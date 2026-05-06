@@ -77,6 +77,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None):
             print(f"\n  {'═'*55}")
             print(f"  [🏁] ROUTE COMPLETED!  {elapsed:.1f}s  {frame} frames")
             print(f"  {'═'*55}")
+            _wait_before_close(dcam, world, vehicle)
             return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Stall detector (5s) ──────────────────────────────────────
@@ -97,9 +98,15 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None):
 
         # ── Goal distance ────────────────────────────────────────────
         if dist < GOAL_M:
+            # Brake smoothly
+            stop = carla.VehicleControl(throttle=0.0, brake=1.0)
+            for _ in range(40):
+                vehicle.apply_control(stop)
+                world.tick()
             print(f"\n  {'═'*55}")
             print(f"  [🏁] GOAL REACHED!  {elapsed:.1f}s  {frame} frames")
             print(f"  {'═'*55}")
+            _wait_before_close(dcam, world, vehicle)
             return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Timeout ──────────────────────────────────────────────────
@@ -108,3 +115,18 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None):
             return {"ok": False, "f": frame, "t": elapsed}
 
     return {"ok": False, "f": frame, "t": time.time() - t0}
+
+
+def _wait_before_close(dcam, world, vehicle):
+    """Keep simulation visible for 5 seconds after goal reached."""
+    print("  [~] Waiting 5s before cleanup...")
+    for _ in range(100):  # 5s = 100 × 0.05
+        world.tick()
+        try:
+            vel = vehicle.get_velocity()
+            spd = 3.6 * math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
+            loc = vehicle.get_location()
+            if dcam and not dcam.render(spd, 0):
+                break
+        except Exception:
+            break

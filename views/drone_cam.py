@@ -15,13 +15,19 @@ if HAS_PYGAME:
 class DroneCam:
     """Overhead drone camera + pygame HUD window."""
 
-    def __init__(self, world, vehicle, end_loc):
+    def __init__(self, world, vehicle, end_loc, start_loc=None):
         self.v    = vehicle
         self.end  = end_loc
         self.img  = None
         self.disp = None
         self.sens = None
         self.font = None
+
+        # Use actual start/end for progress calculation
+        if start_loc is not None:
+            self._total_dist = start_loc.distance(end_loc)
+        else:
+            self._total_dist = WANT_START.distance(WANT_END)
 
         if not HAS_PYGAME:
             return
@@ -68,8 +74,8 @@ class DroneCam:
             self.disp.blit(
                 pygame.surfarray.make_surface(self.img.swapaxes(0, 1)), (0, 0))
 
-            # Progress bar
-            total  = WANT_START.distance(WANT_END)
+            # Progress bar — use actual route distance
+            total = max(self._total_dist, 1.0)
             prog   = max(0.0, min(1.0, 1.0 - dist / total))
             bw     = int((W - 40) * prog)
             pygame.draw.rect(self.disp, (30, 30, 30),  (20, H - 18, W - 40, 8))

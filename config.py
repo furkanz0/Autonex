@@ -102,8 +102,8 @@ LANE_CAM_PITCH = -8.0       # slightly more downward for better lane view
 # =====================================================================
 #  LANE DETECTION — PERSPECTIVE TRANSFORM (normalized 0-1)
 # =====================================================================
-LANE_SRC = [(0.15, 0.90), (0.85, 0.90), (0.40, 0.65), (0.60, 0.65)]
-LANE_DST = [(0.20, 1.00), (0.80, 1.00), (0.20, 0.00), (0.80, 0.00)]
+LANE_SRC = [(0.15, 0.90), (0.85, 0.90), (0.60, 0.60), (0.40, 0.60)]
+LANE_DST = [(0.20, 1.00), (0.80, 1.00), (0.80, 0.00), (0.20, 0.00)]
 
 # =====================================================================
 #  LANE DETECTION — SLIDING WINDOW
@@ -115,7 +115,7 @@ LANE_MINPIX    = 30        # min pixels to recenter window
 # =====================================================================
 #  LANE DETECTION — COLOR THRESHOLDS
 # =====================================================================
-LANE_WHITE_L_THRESH  = 180          # HLS L-channel min for white (lowered)
+LANE_WHITE_L_THRESH  = 220          # HLS L-channel min for white (increased to ignore grey road)
 LANE_YELLOW_LOWER    = (15, 60, 100)   # HSV lower bound (relaxed)
 LANE_YELLOW_UPPER    = (40, 255, 255)  # HSV upper bound
 LANE_SOBEL_LOW       = 25

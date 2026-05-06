@@ -41,7 +41,6 @@ def run_with_map(client, world, wmap, orig):
 
     start = result["start"]
     end = result["end"]
-    pre_wps = result.get("waypoints", [])
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
@@ -53,13 +52,9 @@ def run_with_map(client, world, wmap, orig):
     time.sleep(0.2)
     motion_test(world, vehicle)
 
-    # Route — use navigator route if available, otherwise recompute
-    if pre_wps and len(pre_wps) > 2:
-        waypoints = pre_wps
-        log(f"Using route from navigator: {len(waypoints)} wp")
-    else:
-        end_snapped = snap_end(wmap, end)
-        waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
+    # Always compute route from vehicle's ACTUAL position to end
+    end_snapped = snap_end(wmap, end)
+    waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
 
     if len(waypoints) < 2:
         print("[ERROR] Could not compute route!")
@@ -67,9 +62,10 @@ def run_with_map(client, world, wmap, orig):
         return
 
     end_loc = waypoints[-1].transform.location
+    start_loc = vehicle.get_location()
 
     # Drone camera & simulation
-    dcam = DroneCam(world, vehicle, end_loc)
+    dcam = DroneCam(world, vehicle, end_loc, start_loc)
     for _ in range(3):
         world.tick()
 

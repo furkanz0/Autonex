@@ -146,15 +146,37 @@ class LaneDetector:
 
         # 5. Draw overlay
         result.overlay = self._draw_overlay(frame, result)
+        
+        # DEBUG SAVE every 20 frames
+        if not hasattr(self, '_debug_frame'):
+            self._debug_frame = 0
+        self._debug_frame += 1
+        
+        if self._debug_frame % 20 == 0:
+            import os
+            debug_dir = "lane_debug"
+            if not os.path.exists(debug_dir):
+                os.makedirs(debug_dir)
+            cv2.imwrite(f"{debug_dir}/f{self._debug_frame}_overlay.jpg", result.overlay)
+            cv2.imwrite(f"{debug_dir}/f{self._debug_frame}_warped.jpg", result.warped)
+            cv2.imwrite(f"{debug_dir}/f{self._debug_frame}_binary.jpg", result.binary)
+            
         return result
 
     # ─── Color + Gradient Threshold ──────────────────────────────────
 
     def _threshold(self, frame: np.ndarray) -> np.ndarray:
         """Combine color and gradient thresholds → binary image."""
-        hls = cv2.cvtColor(frame, cv2.COLOR_BGR2HLS)
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # 1. Apply ROI Mask immediately to ignore sky and distant noise
+        roi_mask = np.zeros_like(frame[:,:,0])
+        pts_roi = np.array([[(int(x * self.w), int(y * self.h)) for x, y in LANE_SRC]], dtype=np.int32)
+        cv2.fillPoly(roi_mask, pts_roi, 255)
+        frame_roi = cv2.bitwise_and(frame, frame, mask=roi_mask)
+
+        # Convert to gray, HLS, HSV
+        gray = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2GRAY)
+        hls = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HLS)
+        hsv = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HSV)
 
         # White lanes (high lightness)
         l_ch = hls[:, :, 1]
@@ -167,21 +189,25 @@ class LaneDetector:
 
         # Sobel-X gradient (vertical edges = lane lines)
         sx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
-        abs_sx = np.absolute(sx)
-        scaled = np.uint8(255 * abs_sx / (abs_sx.max() + 1e-6))
+        scaled = cv2.convertScaleAbs(sx)
         sobel = np.zeros_like(gray, dtype=np.uint8)
         sobel[(scaled > LANE_SOBEL_LOW) & (scaled < LANE_SOBEL_HIGH)] = 255
 
-        # S-channel (saturation — good for colored markings)
+        # S-channel (saturation — good for yellow markings)
         s_ch = hls[:, :, 2]
         s_mask = np.zeros_like(gray, dtype=np.uint8)
         s_mask[(s_ch > LANE_S_THRESH_LOW) & (s_ch < LANE_S_THRESH_HIGH)] = 255
 
         # Combine
         combined = np.zeros_like(gray, dtype=np.uint8)
-        combined[(white == 255) |
-                 (yellow == 255) |
-                 ((sobel == 255) & (s_mask == 255))] = 255
+        # White lines: must have high lightness AND strong vertical edges
+        combined[(l_ch > 180) & (sobel == 255)] = 255
+        
+        # Yellow lines: use HSV range OR (strong edges + saturation)
+        combined[(yellow == 255) | ((sobel == 255) & (s_mask == 255))] = 255
+        
+        # Super bright things (like very bright white lines, just in case)
+        combined[white == 255] = 255
 
         combined = cv2.GaussianBlur(combined, (5, 5), 0)
         _, combined = cv2.threshold(combined, 127, 255, cv2.THRESH_BINARY)

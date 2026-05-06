@@ -49,9 +49,9 @@ class LaneController:
         self._lost_count = 0
 
         # ── Steering PID (direct, minimal lag) ───────────────────────
-        # In CARLA: positive steer = LEFT, negative steer = RIGHT
-        # offset > 0 → lane center is right → car is left → need RIGHT → negative steer
-        error = -lane.lateral_offset_m
+        # In CARLA: positive steer = RIGHT, negative steer = LEFT
+        # offset > 0 → lane center is right → car is left → need RIGHT → positive steer
+        error = lane.lateral_offset_m
 
         p = LANE_KP * error
 
