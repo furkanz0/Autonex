@@ -6,6 +6,7 @@ import numpy as np
 # --- HAFIZA MERKEZİ ---
 son_sol_serit = None
 son_sag_serit = None
+son_hata = 0.0
 
 # --- 1. KOORDİNAT HESAPLAMA ---
 def make_coordinates(image, line_parameters):
@@ -51,6 +52,7 @@ def average_slope_intercept(image, lines):
 
 # --- 3. BEYİN VE GÖRÜNTÜ KONTROL MERKEZİ ---
 def process_image(image, vehicle):
+    global son_hata
     i = np.array(image.raw_data)
     i2 = i.reshape((360, 640, 4))
     i3 = i2[:, :, :3] 
@@ -74,18 +76,26 @@ def process_image(image, vehicle):
     line_count = len(averaged_lines) if averaged_lines is not None else 0
 
     if line_count == 2:
-        left_x1 = averaged_lines[0][0]
-        right_x1 = averaged_lines[1][0]
-        lane_center = int((left_x1 + right_x1) / 2)
+        # Alt nokta yerine üst (ileriye dönük / look-ahead) noktayı referans alıyoruz
+        left_x2 = averaged_lines[0][2]
+        right_x2 = averaged_lines[1][2]
+        lane_center = int((left_x2 + right_x2) / 2)
         car_center = 320 
         
         error = lane_center - car_center
-        steering_angle = error * 0.005 
+        
+        # PD Kontrolcüsü (Proportional + Derivative)
+        Kp = 0.008   # Yönelme katsayısı
+        Kd = 0.02    # Salınım (titreme) engelleyici katsayı
+        
+        derivative = error - son_hata
+        steering_angle = (error * Kp) + (derivative * Kd)
+        son_hata = error
         
         cv2.line(line_image, (averaged_lines[0][0], averaged_lines[0][1]), (averaged_lines[0][2], averaged_lines[0][3]), (0, 255, 0), 10)
         cv2.line(line_image, (averaged_lines[1][0], averaged_lines[1][1]), (averaged_lines[1][2], averaged_lines[1][3]), (0, 255, 0), 10)
-        cv2.circle(line_image, (lane_center, 300), 10, (255, 0, 0), -1) 
-        cv2.circle(line_image, (car_center, 360), 10, (0, 0, 255), -1)  
+        cv2.circle(line_image, (lane_center, 180), 10, (255, 0, 0), -1) 
+        cv2.circle(line_image, (car_center, 180), 10, (0, 0, 255), -1)  
 
     elif line_count == 1:
         cv2.line(line_image, (averaged_lines[0][0], averaged_lines[0][1]), (averaged_lines[0][2], averaged_lines[0][3]), (0, 255, 255), 10)

@@ -197,6 +197,27 @@ def main():
         wmap   = world.get_map()
         orig   = sync_on(world)
 
+# ======================================================================
+# --- CARLA HAVA DURUMU (WEATHER PRESETS) KÜTÜPHANESİ ---
+# Not: Sadece kullanmak istediğiniz havanın başındaki '#' işaretini silin.
+# ======================================================================
+
+# --- ☀️ GÜNDÜZ (NOON) SENARYOLARI ---
+# world.set_weather(carla.WeatherParameters.ClearNoon)       # Pırıl pırıl güneşli, temiz hava
+# world.set_weather(carla.WeatherParameters.CloudyNoon)      # Bulutlu ve gölgesiz (Şerit tespiti için en steril hava)
+# world.set_weather(carla.WeatherParameters.WetNoon)         # Yağmur yok ama asfalt sırılsıklam ve yansımalı
+# world.set_weather(carla.WeatherParameters.HardRainNoon)    # Sağanak yağışlı ve ıslak
+# world.set_weather(carla.WeatherParameters.SoftRainNoon)    # Hafif çiseleyen yağmur
+
+# --- 🌅 GÜN BATIMI (SUNSET) SENARYOLARI ---
+# world.set_weather(carla.WeatherParameters.ClearSunset)     # Kızıl gün batımı (Kameraya doğrudan güneş vurur)
+# world.set_weather(carla.WeatherParameters.WetSunset)       # Gün batımı + Islak asfalt (Göz alan yansımalar)
+# world.set_weather(carla.WeatherParameters.HardRainSunset)  # Fırtınalı, karanlık ve kaotik gün batımı
+
+# --- 🌃 GECE (NIGHT) SENARYOLARI ---
+# world.set_weather(carla.WeatherParameters.ClearNight)      # Yıldızlı ve bulutsuz zifiri karanlık
+# world.set_weather(carla.WeatherParameters.HardRainNight)   # Zifiri karanlıkta sağanak yağış
+
         world.set_weather(carla.WeatherParameters.ClearNoon)
         log("Weather: ClearNoon")
 
