@@ -192,26 +192,34 @@ class MapNavigator:
             self._route_wps = []
             return
 
-        if HAS_GRP:
-            try:
-                grp = GlobalRoutePlanner(self.wmap, sampling_resolution=2.0)
-                route = grp.trace_route(self.start_loc, self.end_loc)
-                self._route_wps = [r[0] for r in route]
-                self._route_pixels = []
-                for wp in self._route_wps:
-                    self._route_pixels.append(
-                        self._world_to_base(wp.transform.location))
-                log(f"Route computed: {len(self._route_wps)} waypoints")
-                return
-            except Exception as e:
-                log(f"GRP error: {e}", "!")
-
-        # Fallback: straight line
-        self._route_pixels = [
-            self._world_to_base(self.start_loc),
-            self._world_to_base(self.end_loc),
-        ]
-        self._route_wps = []
+        try:
+            from models.route import build_route, snap_directed, pick_spawn
+            
+            # Snap start location to the actual spawn point the simulation will use
+            spawn_tf = pick_spawn(self.wmap, self.start_loc, self.end_loc)
+            if spawn_tf:
+                aligned_start = spawn_tf.location
+                # Optionally, update the visual start_loc so the green circle matches the spawn point
+                self.start_loc = aligned_start
+            else:
+                aligned_start = snap_directed(self.wmap, self.start_loc, self.end_loc)
+                
+            aligned_end = snap_directed(self.wmap, self.end_loc, self.start_loc)
+            
+            self._route_wps = build_route(self.wmap, aligned_start, aligned_end, self.world)
+            self._route_pixels = []
+            for wp in self._route_wps:
+                self._route_pixels.append(
+                    self._world_to_base(wp.transform.location))
+            log(f"MapNavigator route computed: {len(self._route_wps)} waypoints")
+        except Exception as e:
+            log(f"Route compute error: {e}", "!")
+            # Fallback: straight line
+            self._route_pixels = [
+                self._world_to_base(self.start_loc),
+                self._world_to_base(self.end_loc),
+            ]
+            self._route_wps = []
 
     # ─── Screenshot ──────────────────────────────────────────────────────
 

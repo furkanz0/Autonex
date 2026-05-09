@@ -74,7 +74,8 @@ class DroneCam:
             self.disp.blit(
                 pygame.surfarray.make_surface(self.img.swapaxes(0, 1)), (0, 0))
 
-            # Progress bar — use actual route distance
+            # Progress bar — update total dist if we diverge initially
+            self._total_dist = max(self._total_dist, dist)
             total = max(self._total_dist, 1.0)
             prog   = max(0.0, min(1.0, 1.0 - dist / total))
             bw     = int((W - 40) * prog)

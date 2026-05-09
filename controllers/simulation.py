@@ -63,7 +63,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
 
         # ── MiniMap ──────────────────────────────────────────────────
         if minimap:
-            minimap.render(vehicle.get_transform())
+            minimap.render(vehicle.get_transform(), waypoints, wp_idx)
 
         # ── Log (every 40 frames) ────────────────────────────────────
         if frame % 40 == 0:
@@ -81,7 +81,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
             print(f"\n  {'═'*55}")
             print(f"  [🏁] ROUTE COMPLETED!  {elapsed:.1f}s  {frame} frames")
             print(f"  {'═'*55}")
-            _wait_before_close(dcam, world, vehicle, minimap)
+            _wait_before_close(dcam, world, vehicle, minimap, waypoints, wp_idx)
             if minimap:
                 minimap.destroy()
             return {"ok": True, "f": frame, "t": elapsed}
@@ -112,7 +112,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
             print(f"\n  {'═'*55}")
             print(f"  [🏁] GOAL REACHED!  {elapsed:.1f}s  {frame} frames")
             print(f"  {'═'*55}")
-            _wait_before_close(dcam, world, vehicle, minimap)
+            _wait_before_close(dcam, world, vehicle, minimap, waypoints, wp_idx)
             if minimap:
                 minimap.destroy()
             return {"ok": True, "f": frame, "t": elapsed}
@@ -125,7 +125,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
     return {"ok": False, "f": frame, "t": time.time() - t0}
 
 
-def _wait_before_close(dcam, world, vehicle, minimap=None):
+def _wait_before_close(dcam, world, vehicle, minimap=None, waypoints=None, wp_idx=0):
     """Keep simulation visible for 5 seconds after goal reached."""
     print("  [~] Waiting 5s before cleanup...")
     for _ in range(100):  # 5s = 100 × 0.05
@@ -137,6 +137,6 @@ def _wait_before_close(dcam, world, vehicle, minimap=None):
             if dcam and not dcam.render(spd, 0):
                 break
             if minimap:
-                minimap.render(vehicle.get_transform())
+                minimap.render(vehicle.get_transform(), waypoints, wp_idx)
         except Exception:
             break

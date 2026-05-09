@@ -59,6 +59,52 @@ def snap_end(wmap, loc):
     log("Target snap failed, using original coordinates", "!")
     return loc
 
+def snap_directed(wmap, loc, target_loc):
+    """Snaps to the nearest lane that faces toward the target_loc (avoids opposite lanes)."""
+    wp = wmap.get_waypoint(loc, project_to_road=True, lane_type=carla.LaneType.Driving)
+    if not wp:
+        return loc
+        
+    dx = target_loc.x - loc.x
+    dy = target_loc.y - loc.y
+    mag = math.sqrt(dx*dx + dy*dy) or 1
+    dx, dy = dx/mag, dy/mag
+    
+    yaw = math.radians(wp.transform.rotation.yaw)
+    wp_dx, wp_dy = math.cos(yaw), math.sin(yaw)
+    
+    # If the lane faces opposite to the general direction of the target
+    if dx * wp_dx + dy * wp_dy < 0:
+        # Check opposite direction lanes via API
+        candidates = []
+        left = wp.get_left_lane()
+        right = wp.get_right_lane()
+        if left and left.lane_type == carla.LaneType.Driving: candidates.append(left)
+        if right and right.lane_type == carla.LaneType.Driving: candidates.append(right)
+        
+        # Check opposite direction lanes that are physically separated (different road_id)
+        # by projecting points laterally (left and right up to 20 meters)
+        lat_dx, lat_dy = -wp_dy, wp_dx # Leftward vector
+        for dist in (5, 10, 15, 20):
+            # Left side
+            loc_l = carla.Location(x=loc.x + lat_dx*dist, y=loc.y + lat_dy*dist, z=loc.z)
+            wp_l = wmap.get_waypoint(loc_l, project_to_road=True, lane_type=carla.LaneType.Driving)
+            if wp_l and wp_l.road_id != wp.road_id: candidates.append(wp_l)
+            
+            # Right side
+            loc_r = carla.Location(x=loc.x - lat_dx*dist, y=loc.y - lat_dy*dist, z=loc.z)
+            wp_r = wmap.get_waypoint(loc_r, project_to_road=True, lane_type=carla.LaneType.Driving)
+            if wp_r and wp_r.road_id != wp.road_id: candidates.append(wp_r)
+        
+        for cand in candidates:
+            c_yaw = math.radians(cand.transform.rotation.yaw)
+            c_dx, c_dy = math.cos(c_yaw), math.sin(c_yaw)
+            if dx * c_dx + dy * c_dy > 0:
+                wp = cand
+                break
+                
+    return wp.transform.location
+
 
 def build_route(wmap, start_loc, end_loc, world):
     """
@@ -71,11 +117,11 @@ def build_route(wmap, start_loc, end_loc, world):
             grp   = GlobalRoutePlanner(wmap, sampling_resolution=2.0)
             route = grp.trace_route(start_loc, end_loc)
             wps   = [r[0] for r in route]
-            if len(wps) > 2:
+            if len(wps) > 0:
                 log(f"GlobalRoutePlanner: {len(wps)} waypoints")
                 return wps
             else:
-                print(f"  [!] GRP returned only {len(wps)} waypoints, falling back")
+                print(f"  [!] GRP returned {len(wps)} waypoints, falling back")
         except Exception as e:
             print(f"  [!] GRP error: {e}, falling back to .next() chain")
 

@@ -67,7 +67,7 @@ def run_with_map(client, world, wmap, orig):
 
     # Drone camera, Mini-Map & simulation
     dcam = DroneCam(world, vehicle, end_loc, start_loc)
-    minimap = MiniMap(world, waypoints)
+    minimap = MiniMap(world)
     
     for _ in range(3):
         world.tick()

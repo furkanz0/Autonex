@@ -9,7 +9,7 @@ import math
 from utils.logger import log
 
 class MiniMap:
-    def __init__(self, world, waypoints, win_size=800, margin=40):
+    def __init__(self, world, win_size=320, margin=20):
         self.world = world
         self.wmap = world.get_map()
         self.win_size = win_size
@@ -23,10 +23,10 @@ class MiniMap:
         self.bg_map.fill(18)  # Dark background (BGR: 18, 18, 18)
         
         log("Initializing Dynamic Minimap...")
-        self._prepare_map(waypoints)
+        self._prepare_map()
 
-    def _prepare_map(self, waypoints):
-        """Builds the base static map image with road topology and full path."""
+    def _prepare_map(self):
+        """Builds the base static map image with road topology."""
         topology = self.wmap.get_topology()
         
         # Calculate bounding box to dynamically scale the map
@@ -51,26 +51,6 @@ class MiniMap:
         road_color = (55, 55, 55) # BGR
         for wp_s, wp_e in topology:
             self._draw_road_segment(wp_s, wp_e, road_color)
-            
-        # 2. Draw actual full route path (Distance/Path, not Displacement)
-        if waypoints and len(waypoints) > 1:
-            route_pts = []
-            for wp in waypoints:
-                px, py = self._world_to_pixel(wp.transform.location.x, wp.transform.location.y)
-                route_pts.append([px, py])
-                
-            route_pts = np.array(route_pts, np.int32)
-            route_pts = route_pts.reshape((-1, 1, 2))
-            
-            # Thick blue line for the route
-            route_color = (255, 160, 80) # OpenCV uses BGR
-            cv2.polylines(self.bg_map, [route_pts], isClosed=False, color=route_color, thickness=4, lineType=cv2.LINE_AA)
-            
-            # Start (Green) and End (Red) markers
-            start_pt = tuple(route_pts[0][0])
-            end_pt = tuple(route_pts[-1][0])
-            cv2.circle(self.bg_map, start_pt, 8, (80, 220, 0), -1, cv2.LINE_AA)
-            cv2.circle(self.bg_map, end_pt, 8, (40, 40, 220), -1, cv2.LINE_AA)
 
     def _draw_road_segment(self, wp_start, wp_end, color, step=2.0):
         """Draw a single road segment accurately by interpolating intermediate waypoints."""
@@ -102,10 +82,26 @@ class MiniMap:
         py = self.margin + (y - self._min_y) * self._scale
         return int(px), int(py)
 
-    def render(self, vehicle_transform):
-        """Updates the live map with the current vehicle location."""
+    def render(self, vehicle_transform, waypoints=None, wp_idx=0):
+        """Updates the live map with the current vehicle location and remaining route."""
         # Copy the pre-drawn static background
         canvas = self.bg_map.copy()
+        
+        # Draw remaining route path
+        if waypoints and len(waypoints) > wp_idx:
+            route_pts = []
+            for wp in waypoints[wp_idx:]:
+                px, py = self._world_to_pixel(wp.transform.location.x, wp.transform.location.y)
+                route_pts.append([px, py])
+                
+            if len(route_pts) > 1:
+                route_arr = np.array(route_pts, np.int32).reshape((-1, 1, 2))
+                route_color = (255, 160, 80) # BGR
+                cv2.polylines(canvas, [route_arr], isClosed=False, color=route_color, thickness=4, lineType=cv2.LINE_AA)
+                
+            # Draw End marker at the very last waypoint always
+            end_pt = tuple(route_pts[-1])
+            cv2.circle(canvas, end_pt, 6, (40, 40, 220), -1, cv2.LINE_AA)
         
         # Vehicle coordinates
         v_loc = vehicle_transform.location
