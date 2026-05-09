@@ -24,6 +24,7 @@ from models.route import pick_spawn, snap_end, build_route
 
 from views.drone_cam import DroneCam
 from views.map_navigator import MapNavigator
+from views.minimap import MiniMap
 
 from controllers.simulation import run
 from controllers.lane_simulation import run_lane
@@ -37,7 +38,7 @@ def run_with_map(client, world, wmap, orig):
 
     if result is None:
         print("  [!] Exited map navigator.")
-        return
+        return  
 
     start = result["start"]
     end = result["end"]
@@ -64,12 +65,14 @@ def run_with_map(client, world, wmap, orig):
     end_loc = waypoints[-1].transform.location
     start_loc = vehicle.get_location()
 
-    # Drone camera & simulation
+    # Drone camera, Mini-Map & simulation
     dcam = DroneCam(world, vehicle, end_loc, start_loc)
+    minimap = MiniMap(world, waypoints)
+    
     for _ in range(3):
         world.tick()
 
-    sim_result = run(world, vehicle, waypoints, wmap, end_loc, dcam)
+    sim_result = run(world, vehicle, waypoints, wmap, end_loc, dcam, minimap)
 
     sec("RESULT")
     print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
@@ -193,7 +196,7 @@ def main():
     try:
         # ── Connection & map ─────────────────────────────────────────
         client = connect()
-        world  = load_town04(client)
+        world  = load_town04(client)    #town 04 and town 05
         wmap   = world.get_map()
         orig   = sync_on(world)
 
