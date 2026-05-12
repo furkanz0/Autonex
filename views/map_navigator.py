@@ -26,6 +26,7 @@ if HAS_PYGAME:
     import pygame
 
 if HAS_GRP:
+    # pyrefly: ignore [missing-import]
     from agents.navigation.global_route_planner import GlobalRoutePlanner
 
 

@@ -19,7 +19,7 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from agents.navigation.global_route_planner import GlobalRoutePlanner  # noqa: F401
+    from agents.navigation.global_route_planner import GlobalRoutePlanner  # noqa: F401  
     HAS_GRP = True
 except ImportError:
     HAS_GRP = False

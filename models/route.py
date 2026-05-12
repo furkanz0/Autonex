@@ -9,6 +9,7 @@ from config import HAS_GRP, WANT_START, WANT_END
 from utils.logger import log, sec
 
 if HAS_GRP:
+    # pyrefly: ignore [missing-import]
     from agents.navigation.global_route_planner import GlobalRoutePlanner
 
 
