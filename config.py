@@ -79,7 +79,7 @@ GL_N    = 60      # number of points
 GL_STEP = 3.5     # spacing (m)
 GL_LIFE = 0.11    # lifetime
 GL_SZ   = 0.12
-GL_COL  = carla.Color(0, 225, 65)
+GL_COL  = carla.Color(0, 150, 255)
 
 # =====================================================================
 #  PID / CONTROL CONSTANTS

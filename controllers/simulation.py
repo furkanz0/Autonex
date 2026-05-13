@@ -44,7 +44,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
 
         # ── Spectator + green line ───────────────────────────────────
         spectator_update(spec, vehicle)
-        green_line(world, wmap, vehicle)
+        green_line(world, vehicle, waypoints, wp_idx)
 
         # ── Telemetry ────────────────────────────────────────────────
         try:
