@@ -5,7 +5,7 @@ views/drone_cam.py — Pygame drone camera window and HUD
 import numpy as np
 import carla
 
-from config import HAS_PYGAME, W, H, DFOV, DH, DB, DP, WANT_START, WANT_END
+from config import HAS_PYGAME, W, H, DFOV, DH, DB, DP
 from utils.logger import log
 
 if HAS_PYGAME:
@@ -23,11 +23,7 @@ class DroneCam:
         self.sens = None
         self.font = None
 
-        # Use actual start/end for progress calculation
-        if start_loc is not None:
-            self._total_dist = start_loc.distance(end_loc)
-        else:
-            self._total_dist = WANT_START.distance(WANT_END)
+        # (progress bar removed)
 
         if not HAS_PYGAME:
             return
@@ -74,19 +70,10 @@ class DroneCam:
             self.disp.blit(
                 pygame.surfarray.make_surface(self.img.swapaxes(0, 1)), (0, 0))
 
-            # Progress bar — update total dist if we diverge initially
-            self._total_dist = max(self._total_dist, dist)
-            total = max(self._total_dist, 1.0)
-            prog   = max(0.0, min(1.0, 1.0 - dist / total))
-            bw     = int((W - 40) * prog)
-            pygame.draw.rect(self.disp, (30, 30, 30),  (20, H - 18, W - 40, 8))
-            pygame.draw.rect(self.disp, (0, 200, 70),  (20, H - 18, bw,     8))
-
             spd_col = (255, 80, 80) if speed < 2 else (0, 230, 100)
             lines = [
                 (f"Speed    : {speed:5.1f} km/h", spd_col),
                 (f"To Goal  : {dist:6.0f} m",     (255, 255, 255)),
-                (f"Progress : {prog*100:.0f}%",    (180, 180, 180)),
                 ("ESC → Exit",                     (120, 120, 120)),
             ]
             y = 10

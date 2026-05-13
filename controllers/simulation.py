@@ -51,7 +51,13 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
             vel  = vehicle.get_velocity()
             spd  = 3.6 * math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
             loc  = vehicle.get_location()
-            dist = loc.distance(end_loc)
+            # Rota üzerindeki kalan mesafe: mevcut konumdan wp_idx'e kadar +
+            # wp_idx'den son waypoint'e kadar segment toplamı
+            dist = loc.distance(waypoints[wp_idx].transform.location)
+            for i in range(wp_idx, len(waypoints) - 1):
+                dist += waypoints[i].transform.location.distance(
+                    waypoints[i + 1].transform.location
+                )
         except RuntimeError:
             print("\n  [!] Vehicle unreachable")
             return {"ok": False, "f": frame, "t": elapsed}

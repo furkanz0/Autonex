@@ -27,7 +27,6 @@ from views.map_navigator import MapNavigator
 from views.minimap import MiniMap
 
 from controllers.simulation import run
-from controllers.lane_simulation import run_lane
 
 
 def run_with_map(client, world, wmap, orig):
@@ -145,47 +144,14 @@ def run_default(client, world, wmap, orig):
                 pass
 
 
-def run_lane_mode(client, world, wmap, orig):
-    """OpenCV lane detection driving mode."""
-    sec("LANE DETECTION MODE")
-
-    # Spawn vehicle (use default start for now, or --map first)
-    spawn_tf = pick_spawn(wmap, WANT_START, WANT_END)
-    end_loc = snap_end(wmap, WANT_END)
-
-    vehicle = spawn_tesla(world, spawn_tf)
-    settle_physics(world, ticks=15)
-    time.sleep(0.2)
-    motion_test(world, vehicle)
-
-    sim_result = run_lane(world, vehicle, end_loc)
-
-    sec("RESULT")
-    print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
-    print(f"  Time   : {sim_result['t']:.1f}s")
-    print(f"  Frames : {sim_result['f']}")
-
-    try:
-        if vehicle.is_alive:
-            vehicle.set_autopilot(False)
-            vehicle.destroy()
-            log("Vehicle destroyed.")
-    except Exception:
-        pass
 
 
 def main():
     client = None
     orig = None
     use_map = "--map" in sys.argv
-    use_lane = "--lane" in sys.argv
 
-    if use_lane:
-        mode_name = "LANE DETECTION (OpenCV)"
-    elif use_map:
-        mode_name = "MAP NAVIGATOR"
-    else:
-        mode_name = "DEFAULT ROUTE (Waypoint)"
+    mode_name = "MAP NAVIGATOR" if use_map else "DEFAULT ROUTE (Waypoint)"
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -224,9 +190,7 @@ def main():
         world.set_weather(carla.WeatherParameters.ClearNoon)
         log("Weather: ClearNoon")
 
-        if use_lane:
-            run_lane_mode(client, world, wmap, orig)
-        elif use_map:
+        if use_map:
             run_with_map(client, world, wmap, orig)
         else:
             run_default(client, world, wmap, orig)
