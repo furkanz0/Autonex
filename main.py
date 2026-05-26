@@ -3,9 +3,10 @@
 ║  main.py — CARLA Town05 Tesla Simulation (MVC Entry Point)          ║
 ║                                                                      ║
 ║  Usage:                                                              ║
-║    python main.py          → Waypoint control (default route)        ║
-║    python main.py --map    → Map navigator + waypoint control        ║
-║    python main.py --lane   → OpenCV lane detection driving           ║
+║    python main.py               → Waypoint control (default route)   ║
+║    python main.py --map         → Map navigator + waypoint control   ║
+║    python main.py --lane        → Lane following (default route)     ║
+║    python main.py --map --lane  → Map navigator + lane following     ║
 ╚══════════════════════════════════════════════════════════════════════╝
 """
 
@@ -22,11 +23,12 @@ from models.connection import connect, load_town05, sync_on, sync_off
 from models.vehicle import spawn_tesla, settle_physics, motion_test
 from models.route import pick_spawn, snap_end, build_route
 
-from views.drone_cam import DroneCam
 from views.map_navigator import MapNavigator
 from views.minimap import MiniMap
+from views.lane_cam import LaneCam
 
-from controllers.simulation import run
+from controllers.simulation import run, run_lane
+from controllers.lane_controller import LaneController
 
 
 def run_with_map(client, world, wmap, orig):
@@ -41,20 +43,26 @@ def run_with_map(client, world, wmap, orig):
 
     start = result["start"]
     end = result["end"]
+    nav_waypoints = result.get("waypoints", [])
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
 
-    # Spawn & vehicle
+    # Spawn & vehicle — aynı spawn noktasını kullan
     spawn_tf = pick_spawn(wmap, start, end)
     vehicle = spawn_tesla(world, spawn_tf)
     settle_physics(world, ticks=15)
     time.sleep(0.2)
     motion_test(world, vehicle)
 
-    # Always compute route from vehicle's ACTUAL position to end
-    end_snapped = snap_end(wmap, end)
-    waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
+    # Navigator'dan gelen rotayı kullan (haritada görünen rota)
+    if len(nav_waypoints) >= 2:
+        waypoints = nav_waypoints
+        log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
+    else:
+        # Fallback: tekrar hesapla
+        end_snapped = snap_end(wmap, end)
+        waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
 
     if len(waypoints) < 2:
         print("[ERROR] Could not compute route!")
@@ -62,23 +70,20 @@ def run_with_map(client, world, wmap, orig):
         return
 
     end_loc = waypoints[-1].transform.location
-    start_loc = vehicle.get_location()
 
-    # Drone camera, Mini-Map & simulation
-    dcam = DroneCam(world, vehicle, end_loc, start_loc)
+    # Mini-Map & simulation
     minimap = MiniMap(world)
     
     for _ in range(3):
         world.tick()
 
-    sim_result = run(world, vehicle, waypoints, wmap, end_loc, dcam, minimap)
+    sim_result = run(world, vehicle, waypoints, wmap, end_loc, minimap=minimap)
 
     sec("RESULT")
     print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
     print(f"  Time   : {sim_result['t']:.1f}s")
     print(f"  Frames : {sim_result['f']}")
 
-    dcam.destroy()
     try:
         if vehicle.is_alive:
             vehicle.set_autopilot(False)
@@ -91,7 +96,6 @@ def run_with_map(client, world, wmap, orig):
 def run_default(client, world, wmap, orig):
     """Test with default (hardcoded) route."""
     vehicle = None
-    dcam = None
 
     try:
         # ── Spawn & target ───────────────────────────────────────────
@@ -116,14 +120,12 @@ def run_default(client, world, wmap, orig):
             print("[ERROR] Could not compute route!")
             sys.exit(1)
 
-        # ── Drone camera ─────────────────────────────────────────────
-        sec("6a – Drone Camera")
-        dcam = DroneCam(world, vehicle, end_loc)
+        # ── MiniMap ──────────────────────────────────────────────────
         for _ in range(3):
             world.tick()
 
         # ── Main loop ────────────────────────────────────────────────
-        result = run(world, vehicle, waypoints, wmap, end_loc, dcam)
+        result = run(world, vehicle, waypoints, wmap, end_loc)
 
         # ── Result ───────────────────────────────────────────────────
         sec("RESULT")
@@ -132,8 +134,6 @@ def run_default(client, world, wmap, orig):
         print(f"  Frames : {result['f']}")
 
     finally:
-        if dcam:
-            dcam.destroy()
         if vehicle:
             try:
                 if vehicle.is_alive:
@@ -144,14 +144,153 @@ def run_default(client, world, wmap, orig):
                 pass
 
 
+# =====================================================================
+#  LANE FOLLOWING MODE  (--lane)
+# =====================================================================
+
+def run_lane_default(client, world, wmap, orig):
+    """Lane following with default (hardcoded) route."""
+    vehicle = None
+    lane_cam = None
+    lane_ctrl = None
+
+    try:
+        # ── Spawn & target ───────────────────────────────────────────
+        spawn_tf = pick_spawn(wmap, WANT_START, WANT_END)
+        end_loc  = snap_end(wmap, WANT_END)
+
+        # ── Vehicle ──────────────────────────────────────────────────
+        vehicle = spawn_tesla(world, spawn_tf)
+        settle_physics(world, ticks=15)
+        time.sleep(0.2)
+        motion_test(world, vehicle)
+
+        # ── Route (waypoint fallback + mesafe hesabı için) ───────────
+        start_loc = vehicle.get_location()
+        waypoints = build_route(wmap, start_loc, end_loc, world)
+
+        if len(waypoints) < 2:
+            print("[ERROR] Could not compute route!")
+            sys.exit(1)
+
+        # ── Lane detection sensörleri ─────────────────────────────────
+        sec("6a – Lane Detection Setup")
+        lane_cam  = LaneCam(world, vehicle)
+        lane_ctrl = LaneController()
+
+        minimap = MiniMap(world)
+
+        # Kameranın ilk frame'i alması için birkaç tick bekle
+        for _ in range(5):
+            world.tick()
+
+        # ── Ana döngü (Lane Following) ────────────────────────────────
+        result = run_lane(world, vehicle, waypoints, wmap, end_loc,
+                          lane_ctrl, lane_cam, minimap=minimap)
+
+        # ── Sonuç ────────────────────────────────────────────────────
+        sec("RESULT")
+        print(f"  Status : {'SUCCESS ✓' if result['ok'] else 'INCOMPLETE ✗'}")
+        print(f"  Time   : {result['t']:.1f}s")
+        print(f"  Frames : {result['f']}")
+
+    finally:
+        if lane_cam:
+            lane_cam.destroy()
+        if vehicle:
+            try:
+                if vehicle.is_alive:
+                    vehicle.set_autopilot(False)
+                    vehicle.destroy()
+                    log("Vehicle destroyed.")
+            except Exception:
+                pass
+
+
+def run_lane_with_map(client, world, wmap, orig):
+    """Map navigator + lane following."""
+    sec("MAP NAVIGATOR + LANE FOLLOWING MODE")
+    nav = MapNavigator(world)
+    result = nav.run()
+
+    if result is None:
+        print("  [!] Exited map navigator.")
+        return
+
+    start = result["start"]
+    end = result["end"]
+    nav_waypoints = result.get("waypoints", [])
+
+    log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
+    log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
+
+    # Spawn & vehicle
+    spawn_tf = pick_spawn(wmap, start, end)
+    vehicle = spawn_tesla(world, spawn_tf)
+    settle_physics(world, ticks=15)
+    time.sleep(0.2)
+    motion_test(world, vehicle)
+
+    # Navigator'dan gelen rotayı kullan (haritada görünen rota)
+    if len(nav_waypoints) >= 2:
+        waypoints = nav_waypoints
+        log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
+    else:
+        end_snapped = snap_end(wmap, end)
+        waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
+
+    if len(waypoints) < 2:
+        print("[ERROR] Could not compute route!")
+        vehicle.destroy()
+        return
+
+    end_loc = waypoints[-1].transform.location
+    start_loc = vehicle.get_location()
+
+    # Lane detection + MiniMap
+    sec("6a – Lane Detection Setup")
+    lane_cam  = LaneCam(world, vehicle)
+    lane_ctrl = LaneController()
+
+    minimap = MiniMap(world)
+
+    for _ in range(5):
+        world.tick()
+
+    sim_result = run_lane(world, vehicle, waypoints, wmap, end_loc,
+                          lane_ctrl, lane_cam, minimap=minimap)
+
+    sec("RESULT")
+    print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
+    print(f"  Time   : {sim_result['t']:.1f}s")
+    print(f"  Frames : {sim_result['f']}")
+
+    lane_cam.destroy()
+    try:
+        if vehicle.is_alive:
+            vehicle.set_autopilot(False)
+            vehicle.destroy()
+            log("Vehicle destroyed.")
+    except Exception:
+        pass
+
 
 
 def main():
     client = None
     orig = None
-    use_map = "--map" in sys.argv
+    use_map  = "--map" in sys.argv
+    use_lane = "--lane" in sys.argv
 
-    mode_name = "MAP NAVIGATOR" if use_map else "DEFAULT ROUTE (Waypoint)"
+    # Mode adı belirleme
+    if use_lane and use_map:
+        mode_name = "MAP + LANE FOLLOWING (OpenCV)"
+    elif use_lane:
+        mode_name = "LANE FOLLOWING (OpenCV)"
+    elif use_map:
+        mode_name = "MAP NAVIGATOR (Waypoint PID)"
+    else:
+        mode_name = "DEFAULT ROUTE (Waypoint PID)"
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -190,7 +329,12 @@ def main():
         world.set_weather(carla.WeatherParameters.ClearNoon)
         log("Weather: ClearNoon")
 
-        if use_map:
+        # ── Mode routing ─────────────────────────────────────────────
+        if use_lane and use_map:
+            run_lane_with_map(client, world, wmap, orig)
+        elif use_lane:
+            run_lane_default(client, world, wmap, orig)
+        elif use_map:
             run_with_map(client, world, wmap, orig)
         else:
             run_default(client, world, wmap, orig)
