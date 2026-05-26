@@ -13,7 +13,7 @@ from views.green_line import green_line
 from controllers.vehicle_controller import compute_control
 
 
-def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None, chase_cam=None):
+def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None):
     """
     Main simulation loop.
     Compute control → tick → update spectator/line → telemetry → goal/time check
@@ -71,11 +71,6 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None, chase
         if minimap:
             minimap.render(vehicle.get_transform(), waypoints, wp_idx)
 
-        # ── ChaseCam ────────────────────────────────────────────────
-        if chase_cam and not chase_cam.render(spd, dist):
-            print("\n  [!] Chase camera closed")
-            return {"ok": False, "f": frame, "t": elapsed}
-
         # ── Log (every 40 frames) ────────────────────────────────────
         if frame % 40 == 0:
             print(f"  {frame:>6}  {elapsed:>4.1f}s  "
@@ -92,11 +87,9 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None, chase
             print(f"\n  {'═'*55}")
             print(f"  [🏁] ROUTE COMPLETED!  {elapsed:.1f}s  {frame} frames")
             print(f"  {'═'*55}")
-            _wait_before_close(dcam, world, vehicle, minimap, waypoints, wp_idx, chase_cam)
+            _wait_before_close(dcam, world, vehicle, minimap, waypoints, wp_idx)
             if minimap:
                 minimap.destroy()
-            if chase_cam:
-                chase_cam.destroy()
             return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Stall detector (5s) ──────────────────────────────────────
@@ -125,11 +118,9 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None, chase
             print(f"\n  {'═'*55}")
             print(f"  [🏁] GOAL REACHED!  {elapsed:.1f}s  {frame} frames")
             print(f"  {'═'*55}")
-            _wait_before_close(dcam, world, vehicle, minimap, waypoints, wp_idx, chase_cam)
+            _wait_before_close(dcam, world, vehicle, minimap, waypoints, wp_idx)
             if minimap:
                 minimap.destroy()
-            if chase_cam:
-                chase_cam.destroy()
             return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Timeout ──────────────────────────────────────────────────
@@ -140,7 +131,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, dcam=None, minimap=None, chase
     return {"ok": False, "f": frame, "t": time.time() - t0}
 
 
-def _wait_before_close(dcam, world, vehicle, minimap=None, waypoints=None, wp_idx=0, chase_cam=None):
+def _wait_before_close(dcam, world, vehicle, minimap=None, waypoints=None, wp_idx=0):
     """Keep simulation visible for 5 seconds after goal reached."""
     print("  [~] Waiting 5s before cleanup...")
     for _ in range(100):  # 5s = 100 × 0.05
@@ -153,7 +144,5 @@ def _wait_before_close(dcam, world, vehicle, minimap=None, waypoints=None, wp_id
                 break
             if minimap:
                 minimap.render(vehicle.get_transform(), waypoints, wp_idx)
-            if chase_cam:
-                chase_cam.render(spd, 0)
         except Exception:
             break

@@ -91,11 +91,11 @@ class MapNavigator:
         self._route_pixels = []
         self._route_wps = []     # carla.Waypoint list
 
-        # Prepare map data
-        self._prepare_map_data()
-
         # Store world-coordinate road segments for precise clicking
         self._world_road_segments = []  # (wx1, wy1, wx2, wy2) in world coords
+
+        # Prepare map data
+        self._prepare_map_data()
 
         log("MapNavigator initialized")
 
@@ -463,7 +463,6 @@ class MapNavigator:
                             log(f"Start: ({self.start_loc.x:.1f}, "
                                 f"{self.start_loc.y:.1f})")
                             self._compute_route()
-                            self._center_on_point(self.start_loc)
 
                     elif ev.button == 3:  # Right click → end
                         wloc = self._screen_to_world(*ev.pos)
@@ -473,7 +472,6 @@ class MapNavigator:
                             log(f"End: ({self.end_loc.x:.1f}, "
                                 f"{self.end_loc.y:.1f})")
                             self._compute_route()
-                            self._center_on_point(self.end_loc)
 
                     elif ev.button == 2:  # Middle click → start drag
                         self._dragging = True

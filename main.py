@@ -25,7 +25,6 @@ from models.route import pick_spawn, snap_end, build_route
 from views.drone_cam import DroneCam
 from views.map_navigator import MapNavigator
 from views.minimap import MiniMap
-from views.chase_cam import ChaseCam
 
 from controllers.simulation import run
 
@@ -65,15 +64,14 @@ def run_with_map(client, world, wmap, orig):
     end_loc = waypoints[-1].transform.location
     start_loc = vehicle.get_location()
 
-    # Drone camera, Chase camera, Mini-Map & simulation
+    # Drone camera, Mini-Map & simulation
     dcam = DroneCam(world, vehicle, end_loc, start_loc)
-    chase = ChaseCam(world, vehicle)
     minimap = MiniMap(world)
     
     for _ in range(3):
         world.tick()
 
-    sim_result = run(world, vehicle, waypoints, wmap, end_loc, dcam, minimap, chase)
+    sim_result = run(world, vehicle, waypoints, wmap, end_loc, dcam, minimap)
 
     sec("RESULT")
     print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
@@ -81,7 +79,6 @@ def run_with_map(client, world, wmap, orig):
     print(f"  Frames : {sim_result['f']}")
 
     dcam.destroy()
-    chase.destroy()
     try:
         if vehicle.is_alive:
             vehicle.set_autopilot(False)
