@@ -64,13 +64,42 @@ CAM_UP   =  6.0
 CAM_PIT  = -18.0
 
 # =====================================================================
-#  PYGAME DRONE CAMERA
+#  MULTI-WINDOW LAYOUT  (1920×1080 screen)
 # =====================================================================
-W, H = 960, 540
+#  ┌──────────┐ ┌──────────────────┐ ┌──────────────────┐
+#  │ MiniMap  │ │    DroneCam      │ │    ChaseCam      │
+#  │ 320×320  │ │    780×500       │ │    780×500       │
+#  │ (left)   │ │    (center)      │ │    (right)       │
+#  └──────────┘ └──────────────────┘ └──────────────────┘
+
+SCREEN_W, SCREEN_H = 1920, 1080
+
+# MiniMap (OpenCV) — far left, vertically centered
+MINIMAP_SIZE = 320
+MINIMAP_X    = 10
+MINIMAP_Y    = (SCREEN_H - MINIMAP_SIZE) // 2  # 380
+
+# DroneCam (Pygame) — center
+W, H    = 780, 500
+DRONE_X = 340
+DRONE_Y = (SCREEN_H - H) // 2  # 290
+
+# ChaseCam (OpenCV) — right
+CHASE_W, CHASE_H = 780, 500
+CHASE_X = 1130
+CHASE_Y = (SCREEN_H - CHASE_H) // 2  # 290
+
+# DroneCam sensor params
 DFOV = 90
 DH   = 22.0
 DB   = -14.0
 DP   = -32.0
+
+# ChaseCam sensor params (third-person chase)
+CHASE_FOV  = 90
+CHASE_BACK = -9.0   # behind the vehicle
+CHASE_UP   = 6.0    # above the vehicle
+CHASE_PIT  = -18.0  # pitch angle
 
 # =====================================================================
 #  GREEN LINE
@@ -88,5 +117,4 @@ KP_STEER        = 0.9      # proportional steer
 LOOKAHEAD_M     = 8.0      # lookahead distance (m)
 THROTTLE_CRUISE = 0.55     # cruise throttle (adjusted by speed)
 BRAKE_KP        = 0.5      # proportional brake (on overspeed)
-
 

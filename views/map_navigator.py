@@ -94,6 +94,9 @@ class MapNavigator:
         # Prepare map data
         self._prepare_map_data()
 
+        # Store world-coordinate road segments for precise clicking
+        self._world_road_segments = []  # (wx1, wy1, wx2, wy2) in world coords
+
         log("MapNavigator initialized")
 
     # ─── Map Data Preparation ────────────────────────────────────────────
@@ -138,6 +141,14 @@ class MapNavigator:
             f"{len(self._road_segments)} lines, "
             f"{len(self._spawn_pts)} spawn points")
 
+        # Build world-coordinate road segments for click snapping
+        self._world_road_segments = []
+        for wp_s, wp_e in self._topology:
+            w_pts = self._interpolate_segment_world(wp_s, wp_e)
+            for i in range(len(w_pts) - 1):
+                self._world_road_segments.append(
+                    (w_pts[i][0], w_pts[i][1], w_pts[i+1][0], w_pts[i+1][1]))
+
     def _interpolate_segment(self, wp_start, wp_end, step=2.0):
         """Detail the path from start → end with a waypoint chain."""
         pts = []
@@ -153,6 +164,23 @@ class MapNavigator:
             if cur.transform.location.distance(end_loc) < step * 1.5:
                 break
         pts.append(self._world_to_base(end_loc))
+        return pts
+
+    def _interpolate_segment_world(self, wp_start, wp_end, step=2.0):
+        """Return world coordinate pairs for a topology segment."""
+        pts = []
+        cur = wp_start
+        end_loc = wp_end.transform.location
+        pts.append((cur.transform.location.x, cur.transform.location.y))
+        for _ in range(500):
+            nxt = cur.next(step)
+            if not nxt:
+                break
+            cur = nxt[0]
+            pts.append((cur.transform.location.x, cur.transform.location.y))
+            if cur.transform.location.distance(end_loc) < step * 1.5:
+                break
+        pts.append((end_loc.x, end_loc.y))
         return pts
 
     # ─── Coordinate Transforms ───────────────────────────────────────────
@@ -331,14 +359,57 @@ class MapNavigator:
 
     # ─── Snap to Road ────────────────────────────────────────────────────
 
-    def _snap_to_road(self, loc):
-        """Snap the clicked point to the nearest driving lane."""
+    def _snap_to_road(self, click_loc):
+        """Snap the clicked point to the nearest road using hybrid geometric + waypoint approach."""
+        # Step 1: Find the closest world road segment geometrically
+        best_dist = float('inf')
+        best_point = None
+
+        cx, cy = click_loc.x, click_loc.y
+
+        for wx1, wy1, wx2, wy2 in self._world_road_segments:
+            # Point-to-line-segment distance in world coordinates
+            dx, dy = wx2 - wx1, wy2 - wy1
+            seg_len_sq = dx * dx + dy * dy
+
+            if seg_len_sq < 0.01:  # degenerate segment
+                px, py = wx1, wy1
+            else:
+                t = max(0.0, min(1.0, ((cx - wx1) * dx + (cy - wy1) * dy) / seg_len_sq))
+                px = wx1 + t * dx
+                py = wy1 + t * dy
+
+            d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+            if d < best_dist:
+                best_dist = d
+                best_point = (px, py)
+
+        # Step 2: Max distance check — reject if click is too far from any road
+        if best_point is None or best_dist > 50.0:
+            log(f"Click too far from road ({best_dist:.1f}m), ignoring", "!")
+            return None
+
+        # Step 3: Use the geometric closest point for CARLA waypoint snap
+        snapped_loc = carla.Location(x=best_point[0], y=best_point[1], z=0.0)
         wp = self.wmap.get_waypoint(
-            loc, project_to_road=True,
+            snapped_loc, project_to_road=True,
             lane_type=carla.LaneType.Driving)
         if wp:
             return wp.transform.location
-        return loc
+        return snapped_loc
+
+    # ─── Auto-Center ─────────────────────────────────────────────────────
+
+    def _center_on_point(self, loc):
+        """Pan the map so the given world point is centered, offset for HUD panel."""
+        bx, by = self._world_to_base(loc)
+        cx, cy = self.WIN_W / 2, self.WIN_H / 2
+        # Offset 140px to the right to avoid the 280px HUD panel
+        target_sx = cx + 140
+        target_sy = cy
+        # Solve for pan: target_sx = (bx - cx) * zoom + cx + pan_x
+        self._pan_x = target_sx - (bx - cx) * self._zoom - cx
+        self._pan_y = target_sy - (by - cy) * self._zoom - cy
 
     # ─── Main Loop ───────────────────────────────────────────────────────
 
@@ -386,17 +457,23 @@ class MapNavigator:
                 elif ev.type == pygame.MOUSEBUTTONDOWN:
                     if ev.button == 1:  # Left click → start
                         wloc = self._screen_to_world(*ev.pos)
-                        self.start_loc = self._snap_to_road(wloc)
-                        log(f"Start: ({self.start_loc.x:.1f}, "
-                            f"{self.start_loc.y:.1f})")
-                        self._compute_route()
+                        snapped = self._snap_to_road(wloc)
+                        if snapped is not None:
+                            self.start_loc = snapped
+                            log(f"Start: ({self.start_loc.x:.1f}, "
+                                f"{self.start_loc.y:.1f})")
+                            self._compute_route()
+                            self._center_on_point(self.start_loc)
 
                     elif ev.button == 3:  # Right click → end
                         wloc = self._screen_to_world(*ev.pos)
-                        self.end_loc = self._snap_to_road(wloc)
-                        log(f"End: ({self.end_loc.x:.1f}, "
-                            f"{self.end_loc.y:.1f})")
-                        self._compute_route()
+                        snapped = self._snap_to_road(wloc)
+                        if snapped is not None:
+                            self.end_loc = snapped
+                            log(f"End: ({self.end_loc.x:.1f}, "
+                                f"{self.end_loc.y:.1f})")
+                            self._compute_route()
+                            self._center_on_point(self.end_loc)
 
                     elif ev.button == 2:  # Middle click → start drag
                         self._dragging = True

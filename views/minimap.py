@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import carla
 import math
+from config import MINIMAP_X, MINIMAP_Y
 from utils.logger import log
 
 class MiniMap:
@@ -22,6 +23,8 @@ class MiniMap:
         self.bg_map = np.zeros((win_size, win_size, 3), dtype=np.uint8)
         self.bg_map.fill(18)  # Dark background (BGR: 18, 18, 18)
         
+        self._window_positioned = False
+
         log("Initializing Dynamic Minimap...")
         self._prepare_map()
 
@@ -123,8 +126,11 @@ class MiniMap:
         cv2.putText(canvas, "LIVE TRACKING MINIMAP", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2, cv2.LINE_AA)
         cv2.putText(canvas, f"Vehicle Pos : X={v_loc.x:.1f}, Y={v_loc.y:.1f}", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
         
-        # Show window
+        # Show window and position it on first render
         cv2.imshow("Mini-Map", canvas)
+        if not self._window_positioned:
+            cv2.moveWindow("Mini-Map", MINIMAP_X, MINIMAP_Y)
+            self._window_positioned = True
         cv2.waitKey(1)
 
     def destroy(self):

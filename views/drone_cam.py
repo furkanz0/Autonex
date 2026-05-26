@@ -2,10 +2,12 @@
 views/drone_cam.py — Pygame drone camera window and HUD
 """
 
+import os
+
 import numpy as np
 import carla
 
-from config import HAS_PYGAME, W, H, DFOV, DH, DB, DP
+from config import HAS_PYGAME, W, H, DFOV, DH, DB, DP, DRONE_X, DRONE_Y
 from utils.logger import log
 
 if HAS_PYGAME:
@@ -29,6 +31,8 @@ class DroneCam:
             return
 
         pygame.init()
+        # Position the Pygame window before creating it
+        os.environ['SDL_VIDEO_WINDOW_POS'] = f"{DRONE_X},{DRONE_Y}"
         pygame.display.set_caption("🚁 Town05 Tesla")
         self.disp = pygame.display.set_mode((W, H))
         self.font = pygame.font.SysFont("Consolas", 17, bold=True)
