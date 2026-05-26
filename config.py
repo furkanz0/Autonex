@@ -48,13 +48,13 @@ TARGET_SPEED_KMH = 30.0
 TARGET_SPEED_MS  = TARGET_SPEED_KMH / 3.6
 
 # =====================================================================
-#  ROUTE / MAP
+#  ROUTE / MAP  (Town05 — urban grid)
 # =====================================================================
-WANT_START = carla.Location(x=-200.0, y=14.0, z=0.0)
-WANT_END   = carla.Location(x= 300.0, y=14.0, z=0.0)
+WANT_START = carla.Location(x=-100.0, y=30.0, z=0.0)
+WANT_END   = carla.Location(x=  80.0, y=-140.0, z=0.0)
 
 GOAL_M = 20.0
-MAX_S  = 500
+MAX_S  = 800
 
 # =====================================================================
 #  SPECTATOR CAMERA

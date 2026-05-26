@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════╗
-║  main.py — CARLA Town04 Tesla Simulation (MVC Entry Point)          ║
+║  main.py — CARLA Town05 Tesla Simulation (MVC Entry Point)          ║
 ║                                                                      ║
 ║  Usage:                                                              ║
 ║    python main.py          → Waypoint control (default route)        ║
@@ -18,7 +18,7 @@ import carla
 from config import WANT_START, WANT_END
 from utils.logger import log, sec
 
-from models.connection import connect, load_town04, sync_on, sync_off
+from models.connection import connect, load_town05, sync_on, sync_off
 from models.vehicle import spawn_tesla, settle_physics, motion_test
 from models.route import pick_spawn, snap_end, build_route
 
@@ -155,14 +155,14 @@ def main():
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════════════╗
-║  Town04 Tesla — Autonex Autonomous Driving                         ║
+║  Town05 Tesla — Autonex Autonomous Driving                         ║
 ║  Mode: {mode_name:<59s}║
 ╚══════════════════════════════════════════════════════════════════════╝""")
 
     try:
         # ── Connection & map ─────────────────────────────────────────
         client = connect()
-        world  = load_town04(client)    #town 04 and town 05
+        world  = load_town05(client)    # Town05 — complex urban grid
         wmap   = world.get_map()
         orig   = sync_on(world)
 

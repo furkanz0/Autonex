@@ -29,7 +29,7 @@ class DroneCam:
             return
 
         pygame.init()
-        pygame.display.set_caption("🚁 Town04 Tesla")
+        pygame.display.set_caption("🚁 Town05 Tesla")
         self.disp = pygame.display.set_mode((W, H))
         self.font = pygame.font.SysFont("Consolas", 17, bold=True)
 

@@ -18,13 +18,13 @@ def connect():
     return c
 
 
-def load_town04(client):
-    """Load Town04 map (skip if already loaded)."""
-    sec("2 – Town04")
+def load_town05(client):
+    """Load Town05 map (skip if already loaded)."""
+    sec("2 – Town05")
     world = client.get_world()
-    if "Town04" not in world.get_map().name:
-        print("  [~] Loading Town04...")
-        world = client.load_world("Town04")
+    if "Town05" not in world.get_map().name:
+        print("  [~] Loading Town05...")
+        world = client.load_world("Town05")
         time.sleep(3)
     log(f"Map: {world.get_map().name}")
     return world
