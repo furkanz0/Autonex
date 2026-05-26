@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Visual Studio Code
+.vscode/
+
+# Autonex debug/output
+lane_debug/
+screenshots/
+tempCodeRunnerFile.py
