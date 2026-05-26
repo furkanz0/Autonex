@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "C:\\Users\\Furkan\\Desktop\\Carla\\PythonAPI\\carla"
+    ]
+}
