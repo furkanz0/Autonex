@@ -424,7 +424,7 @@ class MapNavigator:
         """
         sec("MapNavigator – Opening Window")
         pygame.init()
-        pygame.display.set_caption("Autonex Map Navigator — Town05")
+        pygame.display.set_caption("Autonex Map Navigator — Town10HD")
         screen = pygame.display.set_mode((self.WIN_W, self.WIN_H))
         clock = pygame.time.Clock()
         font = pygame.font.SysFont("Consolas", 18, bold=True)

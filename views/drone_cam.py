@@ -33,7 +33,7 @@ class DroneCam:
         pygame.init()
         # Position the Pygame window before creating it
         os.environ['SDL_VIDEO_WINDOW_POS'] = f"{DRONE_X},{DRONE_Y}"
-        pygame.display.set_caption("🚁 Town05 Tesla")
+        pygame.display.set_caption("🚁 Town10HD Tesla")
         self.disp = pygame.display.set_mode((W, H))
         self.font = pygame.font.SysFont("Consolas", 17, bold=True)
 

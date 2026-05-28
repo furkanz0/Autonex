@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════╗
-║  main.py — CARLA Town05 Tesla Simulation (MVC Entry Point)          ║
+║  main.py — CARLA Town10HD Tesla Simulation (MVC Entry Point)         ║
 ║                                                                      ║
 ║  Usage:                                                              ║
 ║    python main.py               → Waypoint control (default route)   ║
@@ -19,16 +19,14 @@ import carla
 from config import WANT_START, WANT_END
 from utils.logger import log, sec
 
-from models.connection import connect, load_town05, sync_on, sync_off
+from models.connection import connect, load_town10, sync_on, sync_off
 from models.vehicle import spawn_tesla, settle_physics, motion_test
 from models.route import pick_spawn, snap_end, build_route
 
 from views.map_navigator import MapNavigator
 from views.minimap import MiniMap
-from views.lane_cam import LaneCam
 
 from controllers.simulation import run, run_lane
-from controllers.lane_controller import LaneController
 
 
 def run_with_map(client, world, wmap, orig):
@@ -151,8 +149,6 @@ def run_default(client, world, wmap, orig):
 def run_lane_default(client, world, wmap, orig):
     """Lane following with default (hardcoded) route."""
     vehicle = None
-    lane_cam = None
-    lane_ctrl = None
 
     try:
         # ── Spawn & target ───────────────────────────────────────────
@@ -165,28 +161,9 @@ def run_lane_default(client, world, wmap, orig):
         time.sleep(0.2)
         motion_test(world, vehicle)
 
-        # ── Route (waypoint fallback + mesafe hesabı için) ───────────
-        start_loc = vehicle.get_location()
-        waypoints = build_route(wmap, start_loc, end_loc, world)
-
-        if len(waypoints) < 2:
-            print("[ERROR] Could not compute route!")
-            sys.exit(1)
-
-        # ── Lane detection sensörleri ─────────────────────────────────
-        sec("6a – Lane Detection Setup")
-        lane_cam  = LaneCam(world, vehicle)
-        lane_ctrl = LaneController()
-
-        minimap = MiniMap(world)
-
-        # Kameranın ilk frame'i alması için birkaç tick bekle
-        for _ in range(5):
-            world.tick()
-
         # ── Ana döngü (Lane Following) ────────────────────────────────
-        result = run_lane(world, vehicle, waypoints, wmap, end_loc,
-                          lane_ctrl, lane_cam, minimap=minimap)
+        # run_lane kendi kamera, detector, controller, dashboard'unu oluşturur
+        result = run_lane(world, vehicle, end_loc=end_loc, client=client)
 
         # ── Sonuç ────────────────────────────────────────────────────
         sec("RESULT")
@@ -195,8 +172,6 @@ def run_lane_default(client, world, wmap, orig):
         print(f"  Frames : {result['f']}")
 
     finally:
-        if lane_cam:
-            lane_cam.destroy()
         if vehicle:
             try:
                 if vehicle.is_alive:
@@ -219,7 +194,6 @@ def run_lane_with_map(client, world, wmap, orig):
 
     start = result["start"]
     end = result["end"]
-    nav_waypoints = result.get("waypoints", [])
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
@@ -231,41 +205,17 @@ def run_lane_with_map(client, world, wmap, orig):
     time.sleep(0.2)
     motion_test(world, vehicle)
 
-    # Navigator'dan gelen rotayı kullan (haritada görünen rota)
-    if len(nav_waypoints) >= 2:
-        waypoints = nav_waypoints
-        log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
-    else:
-        end_snapped = snap_end(wmap, end)
-        waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
+    # Hedef konum
+    end_loc = snap_end(wmap, end)
 
-    if len(waypoints) < 2:
-        print("[ERROR] Could not compute route!")
-        vehicle.destroy()
-        return
-
-    end_loc = waypoints[-1].transform.location
-    start_loc = vehicle.get_location()
-
-    # Lane detection + MiniMap
-    sec("6a – Lane Detection Setup")
-    lane_cam  = LaneCam(world, vehicle)
-    lane_ctrl = LaneController()
-
-    minimap = MiniMap(world)
-
-    for _ in range(5):
-        world.tick()
-
-    sim_result = run_lane(world, vehicle, waypoints, wmap, end_loc,
-                          lane_ctrl, lane_cam, minimap=minimap)
+    # Lane following — run_lane kendi bileşenlerini oluşturur
+    sim_result = run_lane(world, vehicle, end_loc=end_loc, client=client)
 
     sec("RESULT")
     print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
     print(f"  Time   : {sim_result['t']:.1f}s")
     print(f"  Frames : {sim_result['f']}")
 
-    lane_cam.destroy()
     try:
         if vehicle.is_alive:
             vehicle.set_autopilot(False)
@@ -294,14 +244,14 @@ def main():
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════════════╗
-║  Town05 Tesla — Autonex Autonomous Driving                         ║
+║  Town10HD Tesla — Autonex Autonomous Driving                        ║
 ║  Mode: {mode_name:<59s}║
 ╚══════════════════════════════════════════════════════════════════════╝""")
 
     try:
         # ── Connection & map ─────────────────────────────────────────
         client = connect()
-        world  = load_town05(client)    # Town05 — complex urban grid
+        world  = load_town10(client)    # Town10HD — modern urban city
         wmap   = world.get_map()
         orig   = sync_on(world)
 

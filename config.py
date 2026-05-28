@@ -48,10 +48,10 @@ TARGET_SPEED_KMH = 30.0
 TARGET_SPEED_MS  = TARGET_SPEED_KMH / 3.6
 
 # =====================================================================
-#  ROUTE / MAP  (Town05 — urban grid)
+#  ROUTE / MAP  (Town10HD — modern urban city)
 # =====================================================================
-WANT_START = carla.Location(x=-100.0, y=30.0, z=0.0)
-WANT_END   = carla.Location(x=  80.0, y=-140.0, z=0.0)
+WANT_START = carla.Location(x=-50.0, y=25.0, z=0.0)
+WANT_END   = carla.Location(x= 90.0, y=-55.0, z=0.0)
 
 GOAL_M = 20.0
 MAX_S  = 800
@@ -119,8 +119,9 @@ THROTTLE_CRUISE = 0.55     # cruise throttle (adjusted by speed)
 BRAKE_KP        = 0.5      # proportional brake (on overspeed)
 
 # =====================================================================
-#  LANE DETECTION  (--lane mode)
+#  LANE FOLLOWING  (--lane mode)
 # =====================================================================
+
 # — Ön kamera sensörü —
 LANE_CAM_W, LANE_CAM_H = 640, 480   # Ön kamera çözünürlüğü
 LANE_CAM_FOV = 110                    # Geniş açı (şerit kenarları)
@@ -128,11 +129,9 @@ LANE_CAM_X   = 2.2                    # Sensör konumu: aracın önü (m)
 LANE_CAM_Z   = 1.4                    # Sensör yüksekliği (m)
 LANE_CAM_PIT = -8.0                   # Hafif aşağı bakış açısı (°)
 
-# — HLS renk uzayı eşikleri —
-#   Beyaz şerit: yüksek Lightness, düşük Saturation
+# — HLS renk uzayı eşikleri (LaneDetector) —
 WHITE_L_THRESH = (190, 255)
 WHITE_S_THRESH = (0, 60)
-#   Sarı şerit: belirli Hue aralığı + orta Saturation
 YELLOW_H_THRESH = (15, 35)
 YELLOW_S_THRESH = (80, 255)
 YELLOW_L_THRESH = (120, 255)
@@ -142,33 +141,65 @@ CANNY_LOW  = 50
 CANNY_HIGH = 150
 
 # — Perspective Warp (kuşbakışı dönüşüm) —
-#   Kaynak noktalar (640×480 orijinal görüntü üzerinde trapez)
 WARP_SRC = [(180, 310), (460, 310), (20, 470), (620, 470)]
-#   Hedef noktalar (kuşbakışı dikdörtgen)
 WARP_DST = [(120, 0), (520, 0), (120, 480), (520, 480)]
 
 # — Sliding window (kayan pencere) —
-SW_NWINDOWS = 12           # Dikey pencere sayısı
-SW_MARGIN   = 60           # Pencere yarı genişliği (piksel)
-SW_MINPIX   = 40           # Yeni merkez için minimum piksel
+SW_NWINDOWS = 12
+SW_MARGIN   = 60
+SW_MINPIX   = 40
 
-# — Lane PID kontrolcüsü —
-LANE_KP = 0.007            # Oransal (Proportional)
-LANE_KI = 0.0001           # İntegral
-LANE_KD = 0.004            # Türev (Derivative)
+# — Piksel → Metre dönüşüm faktörleri (LaneDetector) —
+LANE_XM_PER_PIX = 3.7 / 400    # x ekseni: 3.7m şerit ≈ 400px (warped)
+LANE_YM_PER_PIX = 30.0 / 480   # y ekseni: 30m görüş ≈ 480px (warped)
 
-# — Lane mode hız / gaz —
-LANE_SPEED_KMH  = 25.0     # Hedef hız (düşük = güvenli)
-LANE_SPEED_MS   = LANE_SPEED_KMH / 3.6
-LANE_THROTTLE   = 0.45     # Cruise gaz
-LANE_BRAKE_KP   = 0.5      # Aşırı hızda fren
+# — Lane PID kontrolcüsü (Vision Mode — metre bazlı offset) —
+LANE_KP = 0.35                  # Oransal (1m offset → 0.35 steer)
+LANE_KI = 0.003                 # İntegral (yavaş düzeltme)
+LANE_KD = 0.08                  # Türev (titreşim sönümleme)
+LANE_HEADING_KP = 0.5           # Heading düzeltme katsayısı (compute_map)
 
-# — Kavşak / şerit kaybı fallback —
-LANE_LOST_MAX   = 20       # Bu kadar frame şerit yoksa waypoint'e geç
-LANE_MIN_PIXELS = 800      # Minimum şerit pikseli (altıysa "kayıp")
+# — Lookahead mesafeleri —
+LANE_LOOKAHEAD_M = 8.0          # Normal seyir lookahead (m)
+LANE_CHANGE_LOOKAHEAD_M = 12.0  # Şerit değiştirme lookahead (m)
 
-# — Debug overlay penceresi —
-LANE_DEBUG_WIN  = True      # Debug penceresi aç (overlay + warped)
-LANE_DEBUG_W    = 480       # Debug pencere genişliği
-LANE_DEBUG_H    = 360       # Debug pencere yüksekliği
+# — Hız kontrolü —
+LANE_CRUISE_KMH = 30.0          # Seyir hızı (km/h)
+LANE_CURVE_KMH  = 20.0          # Viraj hızı (km/h)
+LANE_CURVE_RADIUS_THR = 100.0   # Viraj eşik yarıçapı (m)
+
+# — Şerit değiştirme parametreleri —
+LANE_CHANGE_KMH = 25.0              # Şerit değiştirme hedef hızı
+LANE_CHANGE_TARGET_M = 3.5          # Hedef şerit offset mesafesi (m)
+LANE_CHANGE_CENTER_TOL_M = 0.4      # Merkez toleransı (m)
+LANE_CHANGE_STABLE_FRAMES = 15      # Stabil sayılma frame sayısı
+LANE_CHANGE_SETTLE_FRAMES = 40      # Yerleşme frame sayısı
+LANE_CHANGE_RAMP_FRAMES = 30        # Rampa frame sayısı
+LANE_CHANGE_MIN_FRAMES = 20         # Minimum şerit değiştirme frame
+LANE_CHANGE_MAX_FRAMES = 200        # Maksimum şerit değiştirme frame
+LANE_CHANGE_COMPLETE_RATIO = 0.7    # Tamamlanma oranı
+LANE_MAX_STEER_DELTA = 0.015        # Frame başına maks direksiyon değişimi
+
+# =====================================================================
+#  TRAFFIC LIGHT DETECTION (Kamera — HSV Renk Tespiti)
+# =====================================================================
+# — Kırmızı ışık HSV aralıkları (kırmızı 0/180'de sarmalanır) —
+TL_RED_HSV_LOW1  = (0,   120, 120)    # Alt aralık: H=0-10
+TL_RED_HSV_HIGH1 = (10,  255, 255)
+TL_RED_HSV_LOW2  = (170, 120, 120)    # Üst aralık: H=170-180
+TL_RED_HSV_HIGH2 = (180, 255, 255)
+
+# — Yeşil ışık HSV aralığı —
+TL_GREEN_HSV_LOW  = (40, 80, 80)
+TL_GREEN_HSV_HIGH = (90, 255, 255)
+
+# — Kontur filtreleri —
+TL_MIN_AREA = 60                  # Minimum kontur alanı (piksel²)
+TL_MAX_AREA = 12000               # Maksimum kontur alanı
+TL_MIN_CIRCULARITY = 0.3          # Minimum dairesellik (0-1)
+
+# — Algılama bölgesi ve doğrulama —
+TL_ROI_RATIO = 0.55               # Görüntünün üst %55'i (ışıklar yukarıda)
+TL_CONFIRM_FRAMES = 3             # Tepki için ardışık tespit frame sayısı
+TL_BRAKE_AREA_SCALE = 2000.0      # Fren yoğunluğu alan ölçeği
 
