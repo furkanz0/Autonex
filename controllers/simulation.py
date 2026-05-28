@@ -299,6 +299,11 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         vel = vehicle.get_velocity()
         spd = 3.6 * math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
 
+        # ── Junction Check ───────────────────────────────────────────
+        loc = vehicle.get_location()
+        wp = world.get_map().get_waypoint(loc)
+        in_junction = wp.is_junction if wp else False
+
         # ── Compute control ──────────────────────────────────────────
         if tl_result.should_stop:
             # Kırmızı ışık — fren uygula, mevcut direksiyonu koru
@@ -314,8 +319,12 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                     steer=float(last_steer))
             vehicle.apply_control(ctrl)
         else:
-            # Normal sürüş — kamera PID
-            ctrl = controller.compute(lane_result, spd)
+            if in_junction:
+                # Kavşak içinde harita destekli PID (sarı karelajlara aldanmamak için)
+                ctrl = controller.compute_map(world, vehicle, spd)
+            else:
+                # Normal sürüş — kamera PID
+                ctrl = controller.compute(lane_result, spd)
             vehicle.apply_control(ctrl)
 
         # ── Tick ─────────────────────────────────────────────────────
@@ -328,9 +337,10 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         _draw_carla_lane_debug(world, vehicle, controller.debug_lane_waypoint)
 
         # ── Dashboard ────────────────────────────────────────────────
+        lane_state_ui = "JUNCTION" if (not tl_result.should_stop and in_junction) else controller.lane_change_state
         if not dashboard.render(
                 lane_result, spd, ctrl.steer, frame,
-                controller.lane_change_state, controller.target_offset_m,
+                lane_state_ui, controller.target_offset_m,
                 tl_state=tl_result.state,
                 tl_confirmed=tl_result.confirmed):
             print("\n  [!] Window closed")

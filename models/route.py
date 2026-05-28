@@ -15,39 +15,24 @@ if HAS_GRP:
 
 def pick_spawn(wmap, near, toward):
     """
-    Select the closest spawn point to 'near' from the map's
-    spawn_points() list that faces the 'toward' direction.
-    Prefers closer spawn points more aggressively.
+    Returns a safe spawn transform exactly at the 'near' location,
+    snapped to the correct lane facing 'toward'.
+    This prevents the vehicle from teleporting blocks away to a sparse predefined spawn point.
     """
     sec("3 – Spawn Point Selection")
-    spawns = wmap.get_spawn_points()
-    log(f"Map has {len(spawns)} spawn points")
-
-    dx = toward.x - near.x
-    dy = toward.y - near.y
-    mag = math.sqrt(dx*dx + dy*dy) or 1
-    dx /= mag; dy /= mag
-
-    best, best_score = None, -1e9
-    for sp in spawns:
-        dist = sp.location.distance(near)
-        if dist > 500:
-            continue
-        yr = math.radians(sp.rotation.yaw)
-        dot = math.cos(yr)*dx + math.sin(yr)*dy
-        # Heavier distance penalty so we spawn closer to start
-        score = dot * 10 - dist * 0.05
-        if score > best_score:
-            best_score = score
-            best = sp
-
-    if best is None:
-        best = spawns[0]
-        print("  [!] No suitable spawn found, using first spawn")
-
-    log(f"Selected spawn: ({best.location.x:.1f}, {best.location.y:.1f})  "
-        f"yaw={best.rotation.yaw:.1f}°  score={best_score:.2f}")
-    return best
+    
+    snapped_loc = snap_directed(wmap, near, toward)
+    wp = wmap.get_waypoint(snapped_loc, project_to_road=True, lane_type=carla.LaneType.Driving)
+    
+    if wp:
+        spawn_tf = wp.transform
+        spawn_tf.location.z += 0.5  # Lift slightly to prevent ground collision
+        log(f"Spawn exactly at clicked location: ({spawn_tf.location.x:.1f}, {spawn_tf.location.y:.1f})")
+        return spawn_tf
+        
+    # Fallback if map fails
+    print("  [!] Could not snap to lane, using first available spawn point.")
+    return wmap.get_spawn_points()[0]
 
 
 def snap_end(wmap, loc):

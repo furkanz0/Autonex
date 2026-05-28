@@ -44,7 +44,6 @@ class LaneResult:
     """Tek bir frame'in şerit tespit sonucu."""
     detected: bool = False
     lateral_offset_m: float = 0.0       # + = şerit merkezi sağda → araç solda
-    heading_angle_rad: float = 0.0      # + = araç şeride göre sola bakıyor (sağa steer lazım)
     curvature_m: float = float("inf")   # eğrilik yarıçapı (metre)
     confidence: float = 0.0             # 0.0 – 1.0
     left_fit: Optional[np.ndarray] = field(default=None, repr=False)
@@ -128,35 +127,28 @@ class LaneDetector:
         left_ok = left_pts is not None and len(left_pts[0]) > self._MIN_LANE_PIXELS
         right_ok = right_pts is not None and len(right_pts[0]) > self._MIN_LANE_PIXELS
 
-        alpha = 0.15  # EMA smoothing factor (0.15 yeni, 0.85 eski katsayı)
         detected = False
 
         if left_ok and right_ok:
-            if self._left_fit is not None and self._right_fit is not None:
-                self._left_fit = (1.0 - alpha) * self._left_fit + alpha * left_fit
-                self._right_fit = (1.0 - alpha) * self._right_fit + alpha * right_fit
-            else:
-                self._left_fit = left_fit
-                self._right_fit = right_fit
+            self._left_fit = left_fit
+            self._right_fit = right_fit
             detected = True
         elif left_ok and self._right_fit is not None:
-            self._left_fit = (1.0 - alpha) * self._left_fit + alpha * left_fit
+            self._left_fit = left_fit
             detected = True
         elif right_ok and self._left_fit is not None:
-            self._right_fit = (1.0 - alpha) * self._right_fit + alpha * right_fit
+            self._right_fit = right_fit
             detected = True
         elif self._left_fit is not None and self._right_fit is not None:
             detected = True  # önceki fit ile devam
 
-        # ── 8. Offset + Heading + Eğrilik ────────────────────────────
+        # ── 8. Offset + Eğrilik (Lookahead) ──────────────────────────
         offset_m = 0.0
-        heading_rad = 0.0
         curvature_m = float("inf")
         confidence = 0.0
 
         if detected and self._left_fit is not None and self._right_fit is not None:
             offset_m = self._compute_offset_m(self._left_fit, self._right_fit, h, w)
-            heading_rad = self._compute_heading_rad(self._left_fit, self._right_fit, h)
             curvature_m = self._compute_curvature_m(self._left_fit, self._right_fit, h)
             confidence = self._compute_confidence(left_pts, right_pts, left_ok, right_ok)
 
@@ -170,7 +162,6 @@ class LaneDetector:
         return LaneResult(
             detected=detected,
             lateral_offset_m=offset_m,
-            heading_angle_rad=heading_rad,
             curvature_m=curvature_m,
             confidence=confidence,
             left_fit=self._left_fit,
@@ -287,6 +278,14 @@ class LaneDetector:
                 (nz_x >= xr_low) & (nz_x < xr_high)
             ).nonzero()[0]
 
+            # --- Kavşak / Karelaj Filtresi ---
+            # Bir pencere (120x40 = 4800 piksel) içinde çok fazla şerit pikseli varsa
+            # bu muhtemelen yatay bir dur çizgisi veya kavşaktaki sarı taralı alandır.
+            if len(good_left) > 1500:
+                good_left = np.array([], dtype=np.int64)
+            if len(good_right) > 1500:
+                good_right = np.array([], dtype=np.int64)
+
             left_lane_inds.append(good_left)
             right_lane_inds.append(good_right)
 
@@ -344,8 +343,15 @@ class LaneDetector:
         """
         Şerit merkezinden sapma (metre).
         Pozitif = şerit merkezi sağda → araç solda → sağa dönmeli.
+        Lookahead (İleriye bakış) mesafesindeki sapmayı hesaplar.
         """
-        y_eval = h - 1
+        from config import LANE_LOOKAHEAD_M
+        
+        # Lookahead noktasını piksel cinsinden bul (y=0 resmin üstü, y=h-1 altı)
+        lookahead_px = LANE_LOOKAHEAD_M / LANE_YM_PER_PIX
+        y_eval = (h - 1) - lookahead_px
+        y_eval = max(0, min(h - 1, y_eval))
+
         left_x = left_fit[0] * y_eval**2 + left_fit[1] * y_eval + left_fit[2]
         right_x = right_fit[0] * y_eval**2 + right_fit[1] * y_eval + right_fit[2]
 
@@ -353,32 +359,6 @@ class LaneDetector:
         image_center_px = w / 2.0
 
         return (lane_center_px - image_center_px) * LANE_XM_PER_PIX
-
-    # =================================================================
-    #  HEADING HESAPLAMA (radyan)
-    # =================================================================
-
-    def _compute_heading_rad(self, left_fit, right_fit, h):
-        """
-        Şerit eğrisinin aracın bulunduğu y=h hizasındaki türevini (açısını) alır.
-        Dönüş değeri: - (şeridin heading'i).
-        Negatif türev = şerit sağa yatıyor → araç şeride göre sola bakıyor.
-        Bu durumda negatif heading hatası üretilir, böylece PID sağa (+ steer) kırar.
-        """
-        import math
-        y_eval = h - 1
-
-        left_dx_dy = 2 * left_fit[0] * y_eval + left_fit[1]
-        right_dx_dy = 2 * right_fit[0] * y_eval + right_fit[1]
-        center_dx_dy = (left_dx_dy + right_dx_dy) / 2.0
-
-        # y ekseni resimde aşağı doğru büyür (ileriye gittikçe azalır), bu yüzden - ile çarpıyoruz.
-        dx_m_per_dy_m = -center_dx_dy * (LANE_XM_PER_PIX / LANE_YM_PER_PIX)
-
-        lane_angle = math.atan(dx_m_per_dy_m)
-        heading_error_rad = -lane_angle
-        
-        return heading_error_rad
 
     # =================================================================
     #  EĞRİLİK HESAPLAMA (metre)

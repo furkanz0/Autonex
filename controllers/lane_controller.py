@@ -104,7 +104,7 @@ class LaneController:
 
         self._lost_count = 0
 
-        # ── Steering PID (Stanley/Pure-Pursuit Inspired) ─────────────
+        # ── Steering PID (Pure Pursuit Inspired) ─────────────────────
         # In CARLA: positive steer = RIGHT, negative steer = LEFT
         # offset > 0 → lane center is right → car is left → need RIGHT → positive steer
         self._update_lane_change(lane)
@@ -119,17 +119,12 @@ class LaneController:
         d = LANE_KD * (error - self._prev_error)
         self._prev_error = error
 
-        # Heading (Açısal) Düzeltme
-        # lane.heading_angle_rad < 0 means car points LEFT relative to the lane.
-        # We subtract it to apply RIGHT (+) steer.
-        heading_term = -LANE_HEADING_KP * lane.heading_angle_rad
-
-        raw_steer = p + i + d + heading_term
+        raw_steer = p + i + d
         raw_steer = max(-self.MAX_STEER, min(self.MAX_STEER, raw_steer))
 
         # Responsive EMA smoothing (vision mode)
-        # Artık sensör EMA filtresi olduğu için daha direkt yanıt verebiliriz.
-        steer = 0.70 * raw_steer + 0.30 * self._prev_steer
+        # Sadece çıkışa filtre uygulayarak faz gecikmesini (phase delay) engelliyoruz
+        steer = 0.50 * raw_steer + 0.50 * self._prev_steer
         self._prev_steer = steer
 
         # ── Speed Control ────────────────────────────────────────────
