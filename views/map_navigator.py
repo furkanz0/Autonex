@@ -222,7 +222,7 @@ class MapNavigator:
             return
 
         try:
-            from models.route import build_route, snap_directed, pick_spawn
+            from models.route import build_route, snap_directed, snap_end, pick_spawn
             
             # Snap start location to the actual spawn point the simulation will use
             spawn_tf = pick_spawn(self.wmap, self.start_loc, self.end_loc)
@@ -233,7 +233,7 @@ class MapNavigator:
             else:
                 aligned_start = snap_directed(self.wmap, self.start_loc, self.end_loc)
                 
-            aligned_end = snap_directed(self.wmap, self.end_loc, self.start_loc)
+            aligned_end = snap_end(self.wmap, self.end_loc)
             
             self._route_wps = build_route(self.wmap, aligned_start, aligned_end, self.world)
             self._route_pixels = []
