@@ -163,7 +163,20 @@ def run_lane_default(client, world, wmap, orig):
 
         # ── Ana döngü (Lane Following) ────────────────────────────────
         # run_lane kendi kamera, detector, controller, dashboard'unu oluşturur
-        result = run_lane(world, vehicle, end_loc=end_loc, client=client)
+        waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
+        if len(waypoints) < 2:
+            waypoints = None
+            log("Lane mode route lock disabled: route could not be computed", "!")
+        else:
+            log(f"Lane mode route lock enabled: {len(waypoints)} waypoints")
+
+        result = run_lane(
+            world,
+            vehicle,
+            end_loc=end_loc,
+            client=client,
+            waypoints=waypoints,
+        )
 
         # ── Sonuç ────────────────────────────────────────────────────
         sec("RESULT")
@@ -208,8 +221,26 @@ def run_lane_with_map(client, world, wmap, orig):
     # Hedef konum
     end_loc = snap_end(wmap, end)
 
+    nav_waypoints = result.get("waypoints", [])
+    if len(nav_waypoints) >= 2:
+        waypoints = nav_waypoints
+        log(f"Using navigator route for lane lock: {len(waypoints)} waypoints")
+    else:
+        waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
+        log(f"Computed fallback lane lock route: {len(waypoints)} waypoints")
+
+    if len(waypoints) < 2:
+        print("[ERROR] Could not compute lane lock route!")
+        return
+
     # Lane following — run_lane kendi bileşenlerini oluşturur
-    sim_result = run_lane(world, vehicle, end_loc=end_loc, client=client)
+    sim_result = run_lane(
+        world,
+        vehicle,
+        end_loc=end_loc,
+        client=client,
+        waypoints=waypoints,
+    )
 
     sec("RESULT")
     print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")

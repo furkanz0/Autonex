@@ -81,12 +81,19 @@ class LaneDetector:
         self._frame_count = 0
 
         # ── Debug dizini ─────────────────────────────────────────────
+        self._debug_enabled = os.getenv("AUTONEX_LANE_DEBUG") == "1"
         self._debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lane_debug")
-        os.makedirs(self._debug_dir, exist_ok=True)
+        if self._debug_enabled:
+            os.makedirs(self._debug_dir, exist_ok=True)
 
     # =================================================================
     #  PUBLIC API
     # =================================================================
+
+    def reset(self):
+        """Clear cached lane fits so the next frame locks onto the current lane."""
+        self._left_fit = None
+        self._right_fit = None
 
     def process(self, frame) -> LaneResult:
         """
@@ -156,7 +163,7 @@ class LaneDetector:
         overlay = self._draw_overlay(frame, self._left_fit, self._right_fit, detected)
 
         # ── 10. Debug kayıt (her 50 frame) ───────────────────────────
-        if self._frame_count % 50 == 0:
+        if self._debug_enabled and self._frame_count % 50 == 0:
             self._save_debug(overlay, sw_img)
 
         return LaneResult(

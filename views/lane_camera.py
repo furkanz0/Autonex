@@ -13,6 +13,7 @@ Teknik:
 
 import numpy as np
 import carla
+import queue
 
 from config import (
     LANE_CAM_W, LANE_CAM_H, LANE_CAM_FOV,
@@ -35,6 +36,8 @@ class LaneCamera:
 
     def __init__(self, world, vehicle):
         self._frame = None
+        self._frame_no = None
+        self._queue = queue.Queue(maxsize=8)
         self._sensor = None
 
         lib = world.get_blueprint_library()
@@ -63,13 +66,45 @@ class LaneCamera:
         """CARLA kamera callback: BGRA → BGR numpy array."""
         arr = np.frombuffer(image.raw_data, dtype=np.uint8)
         arr = arr.reshape((image.height, image.width, 4))
-        self._frame = arr[:, :, :3].copy()  # BGRA → BGR
+        frame = arr[:, :, :3].copy()  # BGRA → BGR
+        self._frame = frame
+        self._frame_no = image.frame
+        try:
+            self._queue.put_nowait((image.frame, frame))
+        except queue.Full:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._queue.put_nowait((image.frame, frame))
+            except queue.Full:
+                pass
 
     # ─── Property ─────────────────────────────────────────────────────
     @property
     def frame(self):
         """Son kamera frame'i (np.ndarray BGR veya None)."""
         return self._frame
+
+    @property
+    def frame_no(self):
+        """Son kamera frame numarası."""
+        return self._frame_no
+
+    def wait_for_frame(self, min_frame=None, timeout=0.2):
+        """Belirli tick'e ait veya daha yeni kamera frame'ini kısa süre bekle."""
+        while True:
+            if min_frame is None and self._frame is not None:
+                return self._frame
+            if self._frame is not None and self._frame_no is not None and self._frame_no >= min_frame:
+                return self._frame
+            try:
+                frame_no, frame = self._queue.get(timeout=timeout)
+            except queue.Empty:
+                return self._frame
+            self._frame_no = frame_no
+            self._frame = frame
 
     # ─── Cleanup ──────────────────────────────────────────────────────
     def destroy(self):

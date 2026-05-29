@@ -122,9 +122,8 @@ class LaneController:
         raw_steer = p + i + d
         raw_steer = max(-self.MAX_STEER, min(self.MAX_STEER, raw_steer))
 
-        # Responsive EMA smoothing (vision mode)
-        # Sadece çıkışa filtre uygulayarak faz gecikmesini (phase delay) engelliyoruz
-        steer = 0.50 * raw_steer + 0.50 * self._prev_steer
+        # Light EMA smoothing (single layer only)
+        steer = 0.4 * raw_steer + 0.6 * self._prev_steer
         self._prev_steer = steer
 
         # ── Speed Control ────────────────────────────────────────────
@@ -216,11 +215,21 @@ class LaneController:
             raw_steer = self._lane_change_steer(lateral_error, heading_error, target_dist)
         else:
             raw_steer = p + i + d - LANE_HEADING_KP * heading_error
-        max_steer = 0.28 if (self._lane_change_dir or self._settle_frames > 0) else self.MAX_STEER
+        if self._lane_change_dir or self._settle_frames > 0:
+            max_steer = 0.26
+        elif abs(heading_error) > 0.25:
+            max_steer = 0.28
+        else:
+            max_steer = self.MAX_STEER
         raw_steer = max(-max_steer, min(max_steer, raw_steer))
         steer = self._limit_steer_rate(raw_steer)
 
-        target_kmh = LANE_CHANGE_KMH if (self._lane_change_dir or self._settle_frames > 0) else LANE_CRUISE_KMH
+        if self._lane_change_dir or self._settle_frames > 0:
+            target_kmh = min(LANE_CHANGE_KMH, LANE_CURVE_KMH)
+        elif wp.is_junction or abs(heading_error) > 0.25 or abs(steer) > 0.20:
+            target_kmh = LANE_CURVE_KMH
+        else:
+            target_kmh = LANE_CRUISE_KMH
         throttle, brake = self._speed_control(speed_kmh, target_kmh)
 
         self._last_pid = {
@@ -247,6 +256,80 @@ class LaneController:
             hand_brake=False,
             manual_gear_shift=False,
         )
+
+    def compute_route(self, vehicle, speed_kmh: float, waypoints, wp_idx: int):
+        """Compute lane-center control against a pre-computed route."""
+        if not waypoints or wp_idx >= len(waypoints):
+            return self._lost_control(), wp_idx
+
+        loc = vehicle.get_location()
+        lookahead = max(LANE_LOOKAHEAD_M, 1.0)
+
+        while wp_idx < len(waypoints) - 1:
+            wp_loc = waypoints[wp_idx].transform.location
+            if loc.distance(wp_loc) > lookahead:
+                break
+            wp_idx += 1
+
+        target_wp = waypoints[wp_idx]
+        self._debug_lane_wp = target_wp
+
+        search_from = max(0, wp_idx - 8)
+        search_to = min(len(waypoints), wp_idx + 8)
+        measure_wp = min(
+            waypoints[search_from:search_to],
+            key=lambda wp: loc.distance(wp.transform.location),
+        )
+
+        target_loc = target_wp.transform.location
+        to_target = target_loc - loc
+        target_dist = max(math.hypot(to_target.x, to_target.y), 1e-3)
+        target_dir = carla.Vector3D(to_target.x / target_dist, to_target.y / target_dist, 0.0)
+
+        yaw_rad = math.radians(vehicle.get_transform().rotation.yaw)
+        heading = carla.Vector3D(math.cos(yaw_rad), math.sin(yaw_rad), 0.0)
+
+        wp_right = measure_wp.transform.get_right_vector()
+        lateral = loc - measure_wp.transform.location
+        lateral_error = lateral.x * wp_right.x + lateral.y * wp_right.y
+
+        cross = heading.x * target_dir.y - heading.y * target_dir.x
+        dot = max(-1.0, min(1.0, heading.x * target_dir.x + heading.y * target_dir.y))
+        heading_error = math.atan2(cross, dot)
+
+        error = -lateral_error
+        p = LANE_KP * error
+        self._integral += error
+        self._integral = max(-3.0, min(3.0, self._integral))
+        i = LANE_KI * self._integral
+        d = LANE_KD * (error - self._prev_error)
+        self._prev_error = error
+
+        raw_steer = p + i + d - LANE_HEADING_KP * heading_error
+        max_steer = 0.28 if abs(heading_error) > 0.25 else self.MAX_STEER
+        raw_steer = max(-max_steer, min(max_steer, raw_steer))
+        steer = self._limit_steer_rate(raw_steer)
+
+        target_kmh = LANE_CURVE_KMH if abs(heading_error) > 0.22 or abs(steer) > 0.18 else LANE_CRUISE_KMH
+        throttle, brake = self._speed_control(speed_kmh, target_kmh)
+
+        self._last_pid = {
+            "mode": "ROUTE_PID",
+            "wp_idx": wp_idx,
+            "error": error,
+            "lateral_error": lateral_error,
+            "heading_error": heading_error,
+            "steer": steer,
+            "target_dist": target_dist,
+        }
+
+        return carla.VehicleControl(
+            throttle=float(throttle),
+            steer=float(steer),
+            brake=float(brake),
+            hand_brake=False,
+            manual_gear_shift=False,
+        ), wp_idx
 
     def _target_speed(self, curvature_m: float, abs_steer: float) -> float:
         if abs_steer > 0.15:
@@ -279,8 +362,8 @@ class LaneController:
 
     def _lane_change_steer(self, lateral_error: float, heading_error: float, target_dist: float) -> float:
         """Stable steering law for merging onto the selected yellow lane center."""
-        lateral_term = -0.22 * lateral_error
-        heading_term = -0.75 * heading_error
+        lateral_term = -0.18 * lateral_error
+        heading_term = -0.58 * heading_error
         distance_gain = max(0.45, min(1.0, target_dist / max(LANE_CHANGE_LOOKAHEAD_M, 1.0)))
         return (lateral_term + heading_term) * distance_gain
 
@@ -304,7 +387,7 @@ class LaneController:
         if self._target_lane_id is None:
             adjacent = self._adjacent_lane(current_wp)
             if adjacent is None:
-                self._finish_lane_change()
+                self._abort_lane_change()
                 return None
             self._target_road_id = adjacent.road_id
             self._target_lane_id = adjacent.lane_id
@@ -318,7 +401,7 @@ class LaneController:
         if target_wp is None:
             target_wp = self._adjacent_lane(current_wp)
         if target_wp is None:
-            self._finish_lane_change()
+            self._abort_lane_change()
             return None
 
         right = target_wp.transform.get_right_vector()
@@ -373,6 +456,7 @@ class LaneController:
     def _adjacent_lane(self, wp):
         desired_side = 1 if self._lane_change_dir > 0 else -1
         right = wp.transform.get_right_vector()
+        forward = wp.transform.get_forward_vector()
         candidates = []
 
         for adjacent in (wp.get_left_lane(), wp.get_right_lane()):
@@ -385,6 +469,11 @@ class LaneController:
             if adjacent.lane_type != carla.LaneType.Driving or not same_direction:
                 continue
 
+            adj_forward = adjacent.transform.get_forward_vector()
+            same_heading = (forward.x * adj_forward.x + forward.y * adj_forward.y) > 0.65
+            if not same_heading or not self._lane_marking_allows(wp, desired_side):
+                continue
+
             delta = adjacent.transform.location - wp.transform.location
             side = delta.x * right.x + delta.y * right.y
             if side * desired_side > 0.2:
@@ -394,6 +483,20 @@ class LaneController:
             return None
         candidates.sort(key=lambda item: item[0])
         return candidates[0][1]
+
+    @staticmethod
+    def _lane_marking_allows(wp, desired_side: int) -> bool:
+        marking = wp.right_lane_marking if desired_side > 0 else wp.left_lane_marking
+        lane_change = getattr(marking, "lane_change", None)
+        if lane_change is None:
+            return True
+
+        text = str(lane_change).lower()
+        if "both" in text:
+            return True
+        if desired_side > 0:
+            return "right" in text
+        return "left" in text
 
     def _waypoint_on_target_lane(self, current_wp):
         if self._target_road_id is None or self._target_lane_id is None:
@@ -422,7 +525,20 @@ class LaneController:
         self._lane_change_stable_frames = 0
         self._integral = 0.0
         self._prev_error = 0.0
-        self._prev_steer = 0.0
+
+    def _abort_lane_change(self):
+        self._lane_change_dir = 0
+        self._lane_change_frame = 0
+        self._target_offset_m = 0.0
+        self._target_road_id = None
+        self._target_lane_id = None
+        self._lane_change_cooldown = 20
+        self._settle_road_id = None
+        self._settle_lane_id = None
+        self._settle_frames = 0
+        self._lane_change_stable_frames = 0
+        self._integral = 0.0
+        self._prev_error = 0.0
 
     def _update_lane_change(self, lane: LaneResult):
         if self._lane_change_dir == 0:
