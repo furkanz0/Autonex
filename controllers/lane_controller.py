@@ -122,8 +122,10 @@ class LaneController:
         raw_steer = p + i + d
         raw_steer = max(-self.MAX_STEER, min(self.MAX_STEER, raw_steer))
 
-        # Light EMA smoothing (single layer only)
-        steer = 0.4 * raw_steer + 0.6 * self._prev_steer
+        # Responsive EMA smoothing (vision mode)
+        # Smoothing (0.50) çok fazla faz gecikmesine (phase lag) sebep olup savrulma yaratıyordu.
+        # Daha keskin tepki (0.85) ile savrulmayı engelliyoruz:
+        steer = 0.85 * raw_steer + 0.15 * self._prev_steer
         self._prev_steer = steer
 
         # ── Speed Control ────────────────────────────────────────────

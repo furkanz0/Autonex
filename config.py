@@ -154,9 +154,9 @@ LANE_XM_PER_PIX = 3.7 / 400    # x ekseni: 3.7m şerit ≈ 400px (warped)
 LANE_YM_PER_PIX = 30.0 / 480   # y ekseni: 30m görüş ≈ 480px (warped)
 
 # — Lane PID kontrolcüsü (Vision Mode — metre bazlı offset) —
-LANE_KP = 0.35                  # Oransal (1m offset → 0.35 steer)
-LANE_KI = 0.003                 # İntegral (yavaş düzeltme)
-LANE_KD = 0.08                  # Türev (titreşim sönümleme)
+LANE_KP = 0.15                  # Oransal (P) - Savrulmayı (overshoot) önlemek için düşürüldü
+LANE_KI = 0.001                 # İntegral (I) - Yavaşça toparlama
+LANE_KD = 0.30                  # Türev (D) - Titreşimi (oscillation) sönümlemek için artırıldı
 LANE_HEADING_KP = 0.5           # Heading düzeltme katsayısı (compute_map)
 
 # — Lookahead mesafeleri —
