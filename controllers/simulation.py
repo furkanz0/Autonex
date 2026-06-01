@@ -265,6 +265,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     # Lazy imports — bu modüller sadece lane modunda gerekli
     from views.lane_camera import LaneCamera
     from views.lane_dashboard import LaneDashboard
+    from views.traffic_light_panel import TrafficLightPanel
     from models.lane_detector import LaneDetector
     from controllers.lane_controller import LaneController
     from controllers.traffic_light_controller import CameraTrafficLightDetector
@@ -276,6 +277,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     detector = LaneDetector()
     controller = LaneController()
     dashboard = LaneDashboard()
+    tl_panel = TrafficLightPanel(window_x=0, window_y=530)  # Lane Dashboard'un altı
     tl_detector = CameraTrafficLightDetector()
     keyboard = LaneChangeKeyboard()
     spec = world.get_spectator()
@@ -448,8 +450,11 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 tl_confirmed=tl_result.confirmed):
             print("\n  [!] Window closed")
             vehicle.set_autopilot(False)
-            _cleanup_lane(cam, dashboard, minimap)
+            _cleanup_lane(cam, dashboard, tl_panel, minimap)
             return {"ok": False, "f": frame, "t": elapsed}
+
+        # ── Traffic Light Panel (sunum penceresi) ─────────────────────
+        tl_panel.render(tl_result, raw, spd, ctrl)
 
         # ── MiniMap ──────────────────────────────────────────────────
         if minimap and waypoints:
@@ -536,7 +541,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 print(f"\n  {'═'*55}")
                 print(f"  [🏁] GOAL REACHED!  {elapsed:.1f}s  {frame} frames")
                 print(f"  {'═'*55}")
-                _cleanup_lane(cam, dashboard, minimap)
+                _cleanup_lane(cam, dashboard, tl_panel, minimap)
                 return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Stall detector ───────────────────────────────────────────
@@ -555,11 +560,11 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         if elapsed > MAX_S:
             print(f"\n  [!] Timeout ({MAX_S}s)")
             vehicle.set_autopilot(False)
-            _cleanup_lane(cam, dashboard, minimap)
+            _cleanup_lane(cam, dashboard, tl_panel, minimap)
             return {"ok": False, "f": frame, "t": elapsed}
 
     vehicle.set_autopilot(False)
-    _cleanup_lane(cam, dashboard, minimap)
+    _cleanup_lane(cam, dashboard, tl_panel, minimap)
     return {"ok": False, "f": frame, "t": time.time() - t0}
 
 
@@ -567,8 +572,8 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
 #  LANE MODE YARDIMCI FONKSİYONLAR
 # =====================================================================
 
-def _cleanup_lane(cam, dashboard, minimap=None):
-    """Destroy camera, dashboard, and optional minimap."""
+def _cleanup_lane(cam, dashboard, tl_panel=None, minimap=None):
+    """Destroy camera, dashboard, traffic light panel, and optional minimap."""
     try:
         cam.destroy()
     except Exception:
@@ -577,6 +582,11 @@ def _cleanup_lane(cam, dashboard, minimap=None):
         dashboard.destroy()
     except Exception:
         pass
+    if tl_panel:
+        try:
+            tl_panel.destroy()
+        except Exception:
+            pass
     if minimap:
         try:
             minimap.destroy()
@@ -1841,14 +1851,14 @@ def _draw_carla_lane_debug(world, vehicle, target_wp=None, route_points=None):
             a_right = a_center + carla.Location(x=ar.x * half_a, y=ar.y * half_a)
             b_right = b_center + carla.Location(x=br.x * half_b, y=br.y * half_b)
 
-            world.debug.draw_line(a_left, b_left, thickness=0.12,
-                                  color=carla.Color(0, 255, 255),
+            world.debug.draw_line(a_left, b_left, thickness=0.08,
+                                  color=carla.Color(100, 190, 180),
                                   life_time=life, persistent_lines=False)
-            world.debug.draw_line(a_right, b_right, thickness=0.12,
-                                  color=carla.Color(255, 0, 255),
+            world.debug.draw_line(a_right, b_right, thickness=0.08,
+                                  color=carla.Color(180, 120, 180),
                                   life_time=life, persistent_lines=False)
-            world.debug.draw_line(a_center, b_center, thickness=0.08,
-                                  color=carla.Color(255, 220, 0),
+            world.debug.draw_line(a_center, b_center, thickness=0.06,
+                                  color=carla.Color(200, 175, 80),
                                   life_time=life, persistent_lines=False)
     except Exception:
         pass

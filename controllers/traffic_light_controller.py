@@ -48,6 +48,12 @@ class TrafficLightResult:
     center: Optional[Tuple[int, int]] = None  # (x, y) kontur merkezi
     contour_count: int = 0          # tespit edilen kontur sayısı
     overlay_frame: Optional[np.ndarray] = field(default=None, repr=False)
+    # ── Sunum paneli için ek alanlar ──────────────────────────────────
+    red_mask: Optional[np.ndarray] = field(default=None, repr=False)    # ham kırmızı HSV maskesi
+    green_mask: Optional[np.ndarray] = field(default=None, repr=False)  # ham yeşil HSV maskesi
+    roi_h: int = 0                  # ROI sınırı yüksekliği (piksel)
+    red_contours: list = field(default_factory=list, repr=False)        # kırmızı kontur listesi
+    green_contours: list = field(default_factory=list, repr=False)      # yeşil kontur listesi
 
     @property
     def should_stop(self) -> bool:
@@ -182,6 +188,11 @@ class CameraTrafficLightDetector:
             center=center,
             contour_count=contour_count,
             overlay_frame=overlay,
+            red_mask=red_mask,
+            green_mask=green_mask,
+            roi_h=roi_h,
+            red_contours=red_contours,
+            green_contours=green_contours,
         )
 
     # =================================================================
@@ -248,36 +259,36 @@ class CameraTrafficLightDetector:
 
         # Kırmızı konturları çiz
         for cnt in red_contours:
-            cv2.drawContours(frame, [cnt], -1, (0, 0, 255), 2)
+            cv2.drawContours(frame, [cnt], -1, (80, 90, 200), 1)
         if red_best is not None:
-            cv2.drawContours(frame, [red_best], -1, (0, 0, 255), 3)
+            cv2.drawContours(frame, [red_best], -1, (80, 90, 200), 2)
             center = self._contour_center(red_best)
             if center:
-                cv2.circle(frame, center, 8, (0, 0, 255), -1)
+                cv2.circle(frame, center, 5, (80, 90, 200), -1)
 
         # Yeşil konturları çiz
         for cnt in green_contours:
-            cv2.drawContours(frame, [cnt], -1, (0, 255, 0), 2)
+            cv2.drawContours(frame, [cnt], -1, (80, 190, 100), 1)
         if green_best is not None:
-            cv2.drawContours(frame, [green_best], -1, (0, 255, 0), 3)
+            cv2.drawContours(frame, [green_best], -1, (80, 190, 100), 2)
             center = self._contour_center(green_best)
             if center:
-                cv2.circle(frame, center, 8, (0, 255, 0), -1)
+                cv2.circle(frame, center, 5, (80, 190, 100), -1)
 
         # Durum etiketi
         h, w = frame.shape[:2]
         if state == "red":
-            label = "RED LIGHT" + (" STOP!" if confirmed else " ...")
-            color = (0, 0, 255)
+            label = "RED" + (" STOP" if confirmed else "")
+            color = (80, 90, 200)
         elif state == "green":
-            label = "GREEN LIGHT"
-            color = (0, 255, 0)
+            label = "GREEN"
+            color = (80, 190, 100)
         else:
             label = ""
-            color = (180, 180, 180)
+            color = (140, 140, 150)
 
         if label:
-            cv2.putText(frame, label, (10, 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+            cv2.putText(frame, label, (10, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
         return frame

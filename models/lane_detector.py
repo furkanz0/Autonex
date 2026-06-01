@@ -271,9 +271,9 @@ class LaneDetector:
 
             # Debug pencereler
             cv2.rectangle(out_img, (xl_low, y_low), (xl_high, y_high),
-                          (0, 255, 0), 2)
+                          (100, 180, 140), 1)
             cv2.rectangle(out_img, (xr_low, y_low), (xr_high, y_high),
-                          (0, 255, 0), 2)
+                          (100, 180, 140), 1)
 
             good_left = (
                 (nz_y >= y_low) & (nz_y < y_high) &
@@ -315,7 +315,7 @@ class LaneDetector:
                     left_fit = np.polyfit(ly, lx, 2)
                 except (np.linalg.LinAlgError, ValueError):
                     left_fit = None
-            out_img[ly, lx] = [255, 0, 0]
+            out_img[ly, lx] = [180, 100, 80]
 
         right_pts = None
         right_fit = None
@@ -328,10 +328,10 @@ class LaneDetector:
                     right_fit = np.polyfit(ry, rx, 2)
                 except (np.linalg.LinAlgError, ValueError):
                     right_fit = None
-            out_img[ry, rx] = [0, 0, 255]
+            out_img[ry, rx] = [80, 80, 180]
 
         # Polinom eğrilerini çiz
-        for fit, color in [(left_fit, (255, 255, 0)), (right_fit, (255, 255, 0))]:
+        for fit, color in [(left_fit, (160, 190, 100)), (right_fit, (160, 190, 100))]:
             if fit is not None:
                 plot_y = np.linspace(0, h - 1, h)
                 plot_x = np.clip(
@@ -438,33 +438,33 @@ class LaneDetector:
             pts_left = np.column_stack((left_x, plot_y.astype(int)))
             pts_right = np.flipud(np.column_stack((right_x, plot_y.astype(int))))
             fill_pts = np.vstack((pts_left, pts_right))
-            cv2.fillPoly(lane_fill, [fill_pts], (0, 180, 0))
+            cv2.fillPoly(lane_fill, [fill_pts], (60, 140, 70))
 
             # Ters warp
             unwarped = cv2.warpPerspective(lane_fill, self._M_inv, (w, h))
-            overlay = cv2.addWeighted(overlay, 1.0, unwarped, 0.4, 0)
+            overlay = cv2.addWeighted(overlay, 1.0, unwarped, 0.3, 0)
 
             # Şerit çizgilerini çiz
-            for fit, color in [(left_fit, (0, 200, 255)), (right_fit, (255, 200, 0))]:
+            for fit, color in [(left_fit, (80, 160, 200)), (right_fit, (200, 170, 80))]:
                 line_img = np.zeros_like(frame)
                 px = np.clip(
                     (fit[0] * plot_y**2 + fit[1] * plot_y + fit[2]).astype(int),
                     0, w - 1)
                 pts = np.column_stack((px, plot_y.astype(int)))
-                cv2.polylines(line_img, [pts], False, color, 3)
+                cv2.polylines(line_img, [pts], False, color, 2)
                 unwarped_line = cv2.warpPerspective(line_img, self._M_inv, (w, h))
-                overlay = cv2.addWeighted(overlay, 1.0, unwarped_line, 0.8, 0)
+                overlay = cv2.addWeighted(overlay, 1.0, unwarped_line, 0.6, 0)
 
         # Warp kaynağı trapezini çiz
         src_pts = np.array(WARP_SRC, dtype=np.int32).reshape((-1, 1, 2))
-        cv2.polylines(overlay, [src_pts], True, (255, 255, 0), 1)
+        cv2.polylines(overlay, [src_pts], True, (120, 120, 90), 1)
 
         # Durum göstergesi
         status_txt = "LANE OK" if detected else "LANE LOST"
-        status_col = (0, 230, 118) if detected else (70, 70, 255)
-        cv2.circle(overlay, (w - 20, 20), 8, status_col, -1)
-        cv2.putText(overlay, status_txt, (w - 140, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_col, 1, cv2.LINE_AA)
+        status_col = (80, 190, 120) if detected else (100, 100, 200)
+        cv2.circle(overlay, (w - 20, 20), 6, status_col, -1)
+        cv2.putText(overlay, status_txt, (w - 130, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_col, 1, cv2.LINE_AA)
 
         return overlay
 
