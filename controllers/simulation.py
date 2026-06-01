@@ -175,11 +175,14 @@ class LaneChangeKeyboard:
     VK_1 = 0x31
     VK_2 = 0x32
     VK_3 = 0x33
+    VK_R = 0x52
+    VK_G = 0x47
 
     def __init__(self):
         self._last_pressed = False
         self._last_command = None
         self._last_weather_pressed = False
+        self._last_tl_pressed = False
 
     def poll(self):
         pressed_left = self._down(self.VK_A) or self._down(self.VK_LEFT)
@@ -215,6 +218,21 @@ class LaneChangeKeyboard:
         self._last_weather_pressed = pressed
         return weather
 
+    def poll_tl_override(self):
+        pressed_r = self._down(self.VK_R)
+        pressed_g = self._down(self.VK_G)
+        pressed = pressed_r or pressed_g
+
+        cmd = None
+        if pressed and not self._last_tl_pressed:
+            if pressed_r:
+                cmd = "red"
+            elif pressed_g:
+                cmd = "green"
+
+        self._last_tl_pressed = pressed
+        return cmd
+
     @staticmethod
     def _down(vk):
         state = ctypes.windll.user32.GetAsyncKeyState(vk)
@@ -222,7 +240,7 @@ class LaneChangeKeyboard:
 
 
 def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None,
-             waypoints=None, guide_route=False):
+             waypoints=None, guide_route=False, minimap=None):
     """
     Lane-following simulation loop.
 
@@ -239,6 +257,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         guide_route: when True, route waypoints take over steering. The default
             keeps the old camera-based lane-following mechanics and only uses
             map data around junctions.
+        minimap: optional MiniMap instance for live tracking overlay.
 
     Returns:
         dict with ok, f (frames), t (time)
@@ -273,6 +292,8 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
             traffic_manager.random_right_lanechange_percentage(vehicle, 0)
             traffic_manager.distance_to_leading_vehicle(vehicle, 8.0)
             traffic_manager.set_desired_speed(vehicle, 30.0)
+            # Otonom kırmızı ışık frenini kapat — tamamen kamera tespitine bırak
+            traffic_manager.ignore_lights_percentage(vehicle, 100)
             vehicle.set_autopilot(True, traffic_manager.get_port())
             if waypoints and len(waypoints) >= 2:
                 route_lock = _TrafficManagerRouteLock(traffic_manager, vehicle, waypoints)
@@ -356,7 +377,8 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         in_junction = wp.is_junction if wp else False
 
         # ── Compute control ──────────────────────────────────────────
-        obey_camera_light = traffic_manager is None and tl_result.should_stop
+        # Kırmızı ışık varsa, Traffic Manager olsun ya da olmasın kameraya uy
+        obey_camera_light = tl_result.should_stop
 
         if traffic_manager is not None:
             prev_tm_lane_change = tm_lane_change
@@ -385,6 +407,8 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 ctrl = carla.VehicleControl(
                     throttle=0.0, brake=float(brake_val),
                     steer=float(last_steer))
+            
+            # TM devredeyse, TM'nin oluşturduğu control'ü eziyoruz
             vehicle.apply_control(ctrl)
         elif traffic_manager is not None:
             ctrl = vehicle.get_control()
@@ -424,8 +448,24 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 tl_confirmed=tl_result.confirmed):
             print("\n  [!] Window closed")
             vehicle.set_autopilot(False)
-            _cleanup_lane(cam, dashboard)
+            _cleanup_lane(cam, dashboard, minimap)
             return {"ok": False, "f": frame, "t": elapsed}
+
+        # ── MiniMap ──────────────────────────────────────────────────
+        if minimap and waypoints:
+            # Araç konumuna en yakın waypoint'i bul — rota çizgisi
+            # sadece kalan kısmı göstersin
+            minimap_idx = wp_idx
+            if route_lock is not None:
+                minimap_idx = route_lock.wp_idx
+            elif not route_guided:
+                best_dist = float("inf")
+                for i, w in enumerate(waypoints):
+                    d = loc.distance(w.transform.location)
+                    if d < best_dist:
+                        best_dist = d
+                        minimap_idx = i
+            minimap.render(vehicle.get_transform(), waypoints, minimap_idx)
 
         command = dashboard.consume_command() or keyboard.poll()
         if command:
@@ -450,6 +490,16 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         weather_command = dashboard.consume_weather() or keyboard.poll_weather()
         if weather_command:
             _apply_weather(world, weather_command)
+
+        tl_override = dashboard.consume_tl_override() or keyboard.poll_tl_override()
+        if tl_override:
+            state = carla.TrafficLightState.Red if tl_override == "red" else carla.TrafficLightState.Green
+            count = 0
+            for actor in world.get_actors().filter('traffic.traffic_light'):
+                actor.set_state(state)
+                actor.freeze(True)
+                count += 1
+            log(f"MANUAL OVERRIDE: {count} Traffic Lights set to {state.name} and frozen.")
 
         # ── Console log (every 20 frames) ────────────────────────────
         if frame % 20 == 0:
@@ -486,7 +536,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 print(f"\n  {'═'*55}")
                 print(f"  [🏁] GOAL REACHED!  {elapsed:.1f}s  {frame} frames")
                 print(f"  {'═'*55}")
-                _cleanup_lane(cam, dashboard)
+                _cleanup_lane(cam, dashboard, minimap)
                 return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Stall detector ───────────────────────────────────────────
@@ -505,11 +555,11 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         if elapsed > MAX_S:
             print(f"\n  [!] Timeout ({MAX_S}s)")
             vehicle.set_autopilot(False)
-            _cleanup_lane(cam, dashboard)
+            _cleanup_lane(cam, dashboard, minimap)
             return {"ok": False, "f": frame, "t": elapsed}
 
     vehicle.set_autopilot(False)
-    _cleanup_lane(cam, dashboard)
+    _cleanup_lane(cam, dashboard, minimap)
     return {"ok": False, "f": frame, "t": time.time() - t0}
 
 
@@ -517,8 +567,8 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
 #  LANE MODE YARDIMCI FONKSİYONLAR
 # =====================================================================
 
-def _cleanup_lane(cam, dashboard):
-    """Destroy camera and dashboard."""
+def _cleanup_lane(cam, dashboard, minimap=None):
+    """Destroy camera, dashboard, and optional minimap."""
     try:
         cam.destroy()
     except Exception:
@@ -527,6 +577,11 @@ def _cleanup_lane(cam, dashboard):
         dashboard.destroy()
     except Exception:
         pass
+    if minimap:
+        try:
+            minimap.destroy()
+        except Exception:
+            pass
 
 
 def _set_tm_path(traffic_manager, vehicle, waypoints):

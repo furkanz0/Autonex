@@ -71,10 +71,13 @@ class LaneDashboard:
     _KEY_1     = ord("1")
     _KEY_2     = ord("2")
     _KEY_3     = ord("3")
+    _KEY_R     = ord("r")
+    _KEY_G     = ord("g")
 
     def __init__(self):
         self._command = None    # bekleyen şerit değiştirme komutu
         self._weather = None    # bekleyen hava durumu komutu
+        self._tl_override = None # bekleyen trafik ışığı komutu
         self._window = "Lane Dashboard"
 
         cv2.namedWindow(self._window, cv2.WINDOW_NORMAL)
@@ -127,6 +130,10 @@ class LaneDashboard:
             self._weather = "rainy"
         elif key == self._KEY_3:
             self._weather = "snowy"
+        elif key == self._KEY_R:
+            self._tl_override = "red"
+        elif key == self._KEY_G:
+            self._tl_override = "green"
 
         # Pencere kapatıldı mı kontrol et
         try:
@@ -148,6 +155,12 @@ class LaneDashboard:
         wth = self._weather
         self._weather = None
         return wth
+
+    def consume_tl_override(self):
+        """Bekleyen trafik ışığı komutunu al ve sıfırla."""
+        cmd = self._tl_override
+        self._tl_override = None
+        return cmd
 
     def destroy(self):
         """Dashboard penceresini kapat."""
@@ -292,9 +305,8 @@ class LaneDashboard:
 
         # ── Satır 3: Kontrol bilgisi ─────────────────────────────────
         r3_y = y0 + 100
-        controls = "A/\xe2\x86\x90 Left   D/\xe2\x86\x92 Right   |   1 Sunny   2 Rain   3 Snow   |   ESC Exit"
-        cv2.putText(canvas, "A Left   D Right   |   1 Sunny   2 Rain   3 Snow   |   ESC Exit",
-                    (15, r3_y), self._FONT_S, 1.0, self._GRAY, 1, cv2.LINE_AA)
+        cv2.putText(canvas, "A Left   D Right   |   1 Sunny   2 Rain   3 Snow   |   R Red   G Green   |   ESC Exit",
+                    (15, r3_y), self._FONT_S, 0.9, self._GRAY, 1, cv2.LINE_AA)
 
         # ── Güven barı ───────────────────────────────────────────────
         bar_w = 200

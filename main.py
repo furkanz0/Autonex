@@ -233,6 +233,12 @@ def run_lane_with_map(client, world, wmap, orig):
         print("[ERROR] Could not compute lane lock route!")
         return
 
+    # Mini-Map
+    minimap = MiniMap(world)
+
+    for _ in range(3):
+        world.tick()
+
     # Lane following — run_lane kendi bileşenlerini oluşturur
     sim_result = run_lane(
         world,
@@ -240,6 +246,7 @@ def run_lane_with_map(client, world, wmap, orig):
         end_loc=end_loc,
         client=client,
         waypoints=waypoints,
+        minimap=minimap,
     )
 
     sec("RESULT")
