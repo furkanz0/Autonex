@@ -284,6 +284,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     traffic_manager = None
     tm_lane_change = None
     route_lock = None
+    traffic_light_stop = None
 
     if client is not None and not guide_route:
         try:
@@ -297,6 +298,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
             # Otonom kırmızı ışık frenini kapat — tamamen kamera tespitine bırak
             traffic_manager.ignore_lights_percentage(vehicle, 100)
             vehicle.set_autopilot(True, traffic_manager.get_port())
+            traffic_light_stop = _PreciseTrafficLightStop(traffic_manager, vehicle)
             if waypoints and len(waypoints) >= 2:
                 route_lock = _TrafficManagerRouteLock(traffic_manager, vehicle, waypoints)
                 route_lock.reload(world=world, force=True)
@@ -304,6 +306,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         except Exception as exc:
             traffic_manager = None
             route_lock = None
+            traffic_light_stop = None
             vehicle.set_autopilot(False)
             log(f"Traffic Manager unavailable, falling back to local PID: {exc}", "!")
 
@@ -397,7 +400,14 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 except Exception as exc:
                     log(f"Route lock update skipped this frame: {exc}", "!")
 
-        if obey_camera_light:
+        tl_stop_ctrl = None
+        if traffic_light_stop is not None:
+            tl_stop_ctrl = traffic_light_stop.control(world, spd)
+
+        if tl_stop_ctrl is not None:
+            ctrl = tl_stop_ctrl
+            vehicle.apply_control(ctrl)
+        elif obey_camera_light:
             # Kırmızı ışık — fren uygula, mevcut direksiyonu koru
             brake_val = tl_result.brake_intensity()
             last_steer = controller.last_pid.get("steer", 0.0)
@@ -630,12 +640,114 @@ def _route_point_location(point):
     return None
 
 
+class _PreciseTrafficLightStop:
+    """Move a TM-controlled vehicle closer to the legal red-light stop point."""
+
+    STOP_CENTER_DISTANCE_M = 4.2
+    CREEP_START_DISTANCE_M = 8.5
+    MAX_CREEP_KMH = 9.0
+
+    def __init__(self, traffic_manager, vehicle):
+        self.traffic_manager = traffic_manager
+        self.vehicle = vehicle
+        self._active = False
+
+    def control(self, world, speed_kmh):
+        light = self._red_traffic_light()
+        if light is None:
+            self._restore_autopilot()
+            return None
+
+        stop_loc = self._stop_location(world, light)
+        if stop_loc is None:
+            return None
+
+        loc = self.vehicle.get_location()
+        distance = loc.distance(stop_loc)
+        if distance > self.CREEP_START_DISTANCE_M and speed_kmh > 1.5 and not self._active:
+            return None
+
+        self._active = True
+        self.vehicle.set_autopilot(False)
+        steer = float(self.vehicle.get_control().steer)
+
+        if distance <= self.STOP_CENTER_DISTANCE_M:
+            return carla.VehicleControl(throttle=0.0, brake=1.0, steer=steer)
+
+        if speed_kmh > self.MAX_CREEP_KMH:
+            return carla.VehicleControl(throttle=0.0, brake=0.35, steer=steer)
+
+        throttle = 0.18 if distance > self.STOP_CENTER_DISTANCE_M + 1.5 else 0.10
+        return carla.VehicleControl(throttle=throttle, brake=0.0, steer=steer)
+
+    def _red_traffic_light(self):
+        try:
+            if not self.vehicle.is_at_traffic_light():
+                return None
+            light = self.vehicle.get_traffic_light()
+        except Exception:
+            return None
+        if light is None:
+            return None
+        try:
+            if light.get_state() != carla.TrafficLightState.Red:
+                return None
+        except Exception:
+            return None
+        return light
+
+    def _stop_location(self, world, light):
+        try:
+            stop_wps = light.get_stop_waypoints()
+        except Exception:
+            stop_wps = []
+        if not stop_wps:
+            return None
+
+        loc = self.vehicle.get_location()
+        forward = self.vehicle.get_transform().get_forward_vector()
+        best = None
+        for wp in stop_wps:
+            wp_loc = wp.transform.location
+            delta = wp_loc - loc
+            ahead = delta.x * forward.x + delta.y * forward.y
+            if ahead < -1.0:
+                continue
+            dist = loc.distance(wp_loc)
+            score = dist + max(0.0, -ahead) * 10.0
+            if best is None or score < best[0]:
+                best = (score, wp_loc)
+        if best is not None:
+            return best[1]
+
+        return min(stop_wps, key=lambda wp: loc.distance(wp.transform.location)).transform.location
+
+    def _restore_autopilot(self):
+        if not self._active:
+            return
+        self._active = False
+        try:
+            self.vehicle.set_autopilot(True, self.traffic_manager.get_port())
+            self.traffic_manager.auto_lane_change(self.vehicle, False)
+            self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
+            self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
+            self.traffic_manager.set_desired_speed(self.vehicle, 30.0)
+        except Exception:
+            pass
+
+
 class _TrafficManagerRouteLock:
     """Keep Traffic Manager attached to the user-selected map route."""
 
-    ROUTE_RETURN_DISTANCE_M = 20.0
-    ROUTE_BLOCK_LANE_CHANGE_DISTANCE_M = 20.0
-    ROUTE_RETURN_COMPLETE_BEFORE_M = 15.0
+    ROUTE_RETURN_DISTANCE_M = 58.0
+    ROUTE_CONTROL_WINDOW_DISTANCE_M = 60.0
+    ROUTE_BLOCK_MANUAL_LANE_CHANGE_DISTANCE_M = 7.0
+    ROUTE_RETURN_COMPLETE_BEFORE_M = 24.0
+    ROUTE_STRICT_MATCH_DISTANCE_M = 7.0
+    ROUTE_GUARD_RELOAD_FRAMES = 5
+    ROUTE_GUARD_SPEED_KMH = 30.0
+    ROUTE_LANE_SETTLE_SPEED_KMH = 20.0
+    ROUTE_LANE_SETTLE_REISSUE_FRAMES = 18
 
     def __init__(self, traffic_manager, vehicle, waypoints):
         self.traffic_manager = traffic_manager
@@ -662,6 +774,10 @@ class _TrafficManagerRouteLock:
         self._post_maneuver_grace_frames = 0
         self._last_wp_yaw = None
         self._route_return_active = False
+        self._route_guard_speed_active = False
+        self._route_lane_settle_active = False
+        self._route_lane_settle_direction = None
+        self._last_route_lane_settle_frame = -999
 
     def update(self, world, frame, lane_change_active):
         if len(self.waypoints) < 2:
@@ -687,28 +803,48 @@ class _TrafficManagerRouteLock:
         route_lane_wp = None
         in_route_window = self._inside_route_control_window()
         if current_wp is not None and in_route_window:
-            self._clear_manual_lane()
-            lane_change_active = False
+            if not lane_change_active and self._manual_lane_id is None:
+                self._clear_manual_lane()
+            self._set_route_guard_speed(True)
+            if (not lane_change_active and
+                    frame - self._last_reload_frame >= self.ROUTE_GUARD_RELOAD_FRAMES):
+                self.reload(
+                    world=world,
+                    force=True,
+                    frame=frame,
+                    preserve_locked_lane=True,
+                )
+        elif self._route_guard_speed_active:
+            self._set_route_guard_speed(False)
 
         if current_wp is not None and not lane_change_active:
             route_lane_wp = self._required_route_lane_before_maneuver(current_wp)
-            if route_lane_wp is not None and self._needs_route_lane_return(current_wp, route_lane_wp):
-                self._clear_manual_lane()
-                self._lock_to(route_lane_wp)
-                if not self._route_return_active:
-                    self._begin_route_return()
-                    self.reload(
-                        world=world,
-                        force=True,
-                        frame=frame,
-                        preserve_locked_lane=True,
-                        smooth_correction=True,
-                    )
-                    self._last_lane_correction_frame = frame
-                self._last_lane_change_active = lane_change_active
-                return
+            if route_lane_wp is not None:
+                if self._needs_route_lane_return(current_wp, route_lane_wp):
+                    self._clear_manual_lane()
+                    self._lock_to(route_lane_wp)
+                    self._force_route_lane_settle(current_wp, route_lane_wp, frame)
+                    if not self._route_return_active:
+                        self._begin_route_return()
+                        self.reload(
+                            world=world,
+                            force=True,
+                            frame=frame,
+                            preserve_locked_lane=True,
+                            smooth_correction=True,
+                        )
+                        self._last_lane_correction_frame = frame
+                    self._last_lane_change_active = lane_change_active
+                    return
+                self._finish_route_lane_settle()
             elif self._route_return_active and not off_route and not in_route_window:
+                self._finish_route_lane_settle()
                 self._finish_route_return()
+
+        if (off_route and self._manual_lane_id is not None and
+                route_lane_wp is None and current_wp is not None and
+                not current_wp.is_junction):
+            off_route = False
 
         if off_route and not lane_change_active:
             if frame - self._last_lane_correction_frame >= 25:
@@ -757,8 +893,13 @@ class _TrafficManagerRouteLock:
                 return
 
         self._last_lane_change_active = lane_change_active
-        if needs_reload and frame - self._last_reload_frame >= 60:
-            self.reload(world=world, frame=frame, preserve_locked_lane=preserve_locked_lane)
+        if needs_reload and frame - self._last_reload_frame >= 12:
+            self.reload(
+                world=world,
+                force=True,
+                frame=frame,
+                preserve_locked_lane=preserve_locked_lane,
+            )
 
     def blocks_lane_change(self, world):
         if len(self.waypoints) < 2:
@@ -772,14 +913,14 @@ class _TrafficManagerRouteLock:
         maneuver_distance = self._distance_to_route_maneuver(self.wp_idx)
         return (
             maneuver_distance is not None and
-            maneuver_distance <= self.ROUTE_BLOCK_LANE_CHANGE_DISTANCE_M
+            maneuver_distance <= self.ROUTE_BLOCK_MANUAL_LANE_CHANGE_DISTANCE_M
         )
 
     def _inside_route_control_window(self):
         maneuver_distance = self._distance_to_route_maneuver(self.wp_idx)
         return (
             maneuver_distance is not None and
-            maneuver_distance <= self.ROUTE_BLOCK_LANE_CHANGE_DISTANCE_M
+            maneuver_distance <= self.ROUTE_CONTROL_WINDOW_DISTANCE_M
         )
 
     def is_route_done(self):
@@ -962,6 +1103,18 @@ class _TrafficManagerRouteLock:
         except Exception:
             pass
 
+    def _set_route_guard_speed(self, active):
+        if active == self._route_guard_speed_active:
+            return
+        try:
+            self.traffic_manager.set_desired_speed(
+                self.vehicle,
+                self.ROUTE_GUARD_SPEED_KMH if active else 30.0,
+            )
+            self._route_guard_speed_active = active
+        except Exception:
+            pass
+
     def _begin_route_return(self):
         self._route_return_active = True
 
@@ -1005,16 +1158,16 @@ class _TrafficManagerRouteLock:
             distance += loc.distance(last_loc)
             last_loc = loc
 
-            route_transition = (
-                wp.road_id != last_wp.road_id
+            lane_transition = (
+                wp.road_id == last_wp.road_id and
+                wp.section_id == last_wp.section_id and
+                wp.lane_id != last_wp.lane_id
             )
-            transition_turns = abs(
-                self._yaw_delta(last_wp.transform.rotation.yaw, wp.transform.rotation.yaw)
-            ) > 8.0
             route_decision = (
                 getattr(wp, "is_junction", False) or
+                self._has_route_branch(wp) or
                 self._has_route_branch(last_wp) or
-                (route_transition and transition_turns)
+                lane_transition
             )
             if route_decision:
                 return i if distance <= 150.0 else None
@@ -1023,7 +1176,7 @@ class _TrafficManagerRouteLock:
 
     def _has_route_branch(self, wp):
         forward = wp.transform.get_forward_vector()
-        for lookahead in (4.0, 8.0, 12.0, 16.0):
+        for lookahead in (2.0, 4.0, 8.0, 12.0, 16.0, 24.0):
             try:
                 next_wps = wp.next(lookahead)
             except Exception:
@@ -1042,7 +1195,10 @@ class _TrafficManagerRouteLock:
                 key = (
                     candidate.road_id,
                     candidate.section_id,
+                    candidate.lane_id,
                     round(candidate.transform.rotation.yaw / 5.0) * 5,
+                    round(candidate.transform.location.x / 2.0) * 2,
+                    round(candidate.transform.location.y / 2.0) * 2,
                 )
                 if key in seen:
                     continue
@@ -1104,27 +1260,154 @@ class _TrafficManagerRouteLock:
         return route_lane_wp
 
     def _route_lane_before_maneuver(self, current_wp, maneuver_idx):
+        approach_wp = self._approach_lane_for_route_branch(current_wp, maneuver_idx)
+        if approach_wp is not None:
+            return approach_wp
+
         candidates = []
         current_loc = current_wp.transform.location
-        for wp in self.waypoints[self.wp_idx:maneuver_idx]:
+        stop = min(len(self.waypoints), maneuver_idx + 5)
+        for route_idx in range(self.wp_idx, stop):
+            wp = self.waypoints[route_idx]
             if getattr(wp, "is_junction", False):
                 break
             if not self._same_direction_waypoints(current_wp, wp):
                 continue
             dist = current_loc.distance(wp.transform.location)
-            if dist > 80.0:
+            if dist > 95.0:
                 continue
             same_segment = (
                 wp.road_id == current_wp.road_id and
                 wp.section_id == current_wp.section_id
             )
-            score = (0 if same_segment else 25.0) + dist
+            distance_to_maneuver_idx = abs(maneuver_idx - route_idx)
+            future_bonus = -min(max(route_idx - self.wp_idx, 0), 24) * 0.6
+            segment_penalty = 0.0 if same_segment else 12.0
+            lane_penalty = 0.0 if wp.lane_id != current_wp.lane_id else 8.0
+            score = (
+                distance_to_maneuver_idx * 2.2 +
+                dist * 0.25 +
+                segment_penalty +
+                lane_penalty +
+                future_bonus
+            )
             candidates.append((score, wp))
 
         if not candidates:
             return None
         candidates.sort(key=lambda item: item[0])
         return candidates[0][1]
+
+    def _approach_lane_for_route_branch(self, current_wp, maneuver_idx):
+        target_wp = self._route_target_after_maneuver(maneuver_idx)
+        if target_wp is None:
+            return None
+
+        candidates = self._same_direction_lanes_on_current_section(current_wp)
+        if not candidates:
+            return None
+
+        best = None
+        for candidate in candidates:
+            score = self._lane_reaches_route_target(candidate, target_wp)
+            if score is None:
+                continue
+            lateral = candidate.transform.location.distance(current_wp.transform.location)
+            total = score + lateral * 0.4
+            if best is None or total < best[0]:
+                best = (total, candidate)
+
+        return best[1] if best is not None else None
+
+    def _route_target_after_maneuver(self, maneuver_idx):
+        start = max(0, maneuver_idx)
+        stop = min(len(self.waypoints), maneuver_idx + 18)
+        maneuver_loc = self.waypoints[maneuver_idx].transform.location
+        fallback = None
+        for wp in self.waypoints[start:stop]:
+            if getattr(wp, "is_junction", False):
+                continue
+            if fallback is None:
+                fallback = wp
+            if maneuver_loc.distance(wp.transform.location) >= 8.0:
+                return wp
+        return fallback
+
+    def _same_direction_lanes_on_current_section(self, current_wp):
+        lanes = []
+        seen = set()
+
+        def add_lane(wp):
+            if wp is None:
+                return
+            key = (wp.road_id, wp.section_id, wp.lane_id)
+            if key in seen:
+                return
+            if wp.lane_type != carla.LaneType.Driving:
+                return
+            if wp.road_id != current_wp.road_id or wp.section_id != current_wp.section_id:
+                return
+            if not self._same_direction_waypoints(current_wp, wp):
+                return
+            seen.add(key)
+            lanes.append(wp)
+
+        add_lane(current_wp)
+        frontier = [current_wp]
+        for _ in range(3):
+            next_frontier = []
+            for wp in frontier:
+                for adjacent in (wp.get_left_lane(), wp.get_right_lane()):
+                    before = len(lanes)
+                    add_lane(adjacent)
+                    if len(lanes) > before:
+                        next_frontier.append(adjacent)
+            frontier = next_frontier
+            if not frontier:
+                break
+        return lanes
+
+    def _lane_reaches_route_target(self, lane_wp, target_wp):
+        current = lane_wp
+        best = None
+        max_steps = 34
+        for step_idx in range(max_steps):
+            dist = current.transform.location.distance(target_wp.transform.location)
+            if self._same_route_branch(current, target_wp):
+                return step_idx * 0.8 + dist * 0.15
+            if best is None or dist < best:
+                best = dist
+            try:
+                next_wps = current.next(2.5)
+            except Exception:
+                return None
+            if not next_wps:
+                return None
+
+            valid = [
+                wp for wp in next_wps
+                if wp.lane_type == carla.LaneType.Driving and
+                self._same_direction_waypoints(current, wp)
+            ]
+            if not valid:
+                return None
+            current = min(
+                valid,
+                key=lambda wp: wp.transform.location.distance(target_wp.transform.location),
+            )
+
+        if best is not None and best < 6.0:
+            return max_steps + best
+        return None
+
+    def _same_route_branch(self, candidate_wp, target_wp):
+        if candidate_wp.road_id != target_wp.road_id:
+            return False
+        if candidate_wp.section_id != target_wp.section_id:
+            return False
+        if candidate_wp.lane_id != target_wp.lane_id:
+            return False
+        return self._same_direction_waypoints(candidate_wp, target_wp)
 
     def _nearest_route_lane_for_recovery(self, current_wp):
         current_loc = current_wp.transform.location
@@ -1157,6 +1440,69 @@ class _TrafficManagerRouteLock:
         if current_wp.section_id != route_lane_wp.section_id:
             return True
         return current_wp.lane_id != route_lane_wp.lane_id
+
+    def _force_route_lane_settle(self, current_wp, route_lane_wp, frame=None):
+        if not self._needs_route_lane_return(current_wp, route_lane_wp):
+            self._finish_route_lane_settle()
+            return
+
+        direction = self._route_lane_change_direction(current_wp, route_lane_wp)
+        if direction is None:
+            return
+
+        try:
+            self.traffic_manager.set_desired_speed(
+                self.vehicle,
+                min(self.ROUTE_GUARD_SPEED_KMH, self.ROUTE_LANE_SETTLE_SPEED_KMH),
+            )
+
+            same_settle = (
+                self._route_lane_settle_active and
+                self._route_lane_settle_direction == direction
+            )
+            if same_settle:
+                if frame is None:
+                    return
+                if frame - self._last_route_lane_settle_frame < self.ROUTE_LANE_SETTLE_REISSUE_FRAMES:
+                    return
+
+            self._route_lane_settle_active = True
+            self._route_lane_settle_direction = direction
+            self._last_route_lane_settle_frame = frame if frame is not None else -999
+            _force_tm_lane_change(self.traffic_manager, self.vehicle, direction)
+        except Exception:
+            pass
+
+    def _finish_route_lane_settle(self):
+        if not self._route_lane_settle_active:
+            return
+        self._route_lane_settle_active = False
+        self._route_lane_settle_direction = None
+        self._last_route_lane_settle_frame = -999
+        try:
+            self.traffic_manager.set_desired_speed(
+                self.vehicle,
+                self.ROUTE_GUARD_SPEED_KMH if self._route_guard_speed_active else 30.0,
+            )
+        except Exception:
+            pass
+
+    def _route_lane_change_direction(self, current_wp, route_lane_wp):
+        right = current_wp.transform.get_right_vector()
+        delta = route_lane_wp.transform.location - current_wp.transform.location
+        side = delta.x * right.x + delta.y * right.y
+        if abs(side) < 0.25:
+            return None
+
+        direction = "right" if side > 0.0 else "left"
+        adjacent = current_wp.get_right_lane() if direction == "right" else current_wp.get_left_lane()
+        if adjacent is None:
+            return None
+        if adjacent.lane_type != carla.LaneType.Driving:
+            return None
+        if not self._same_direction_waypoints(current_wp, adjacent):
+            return None
+        return direction
 
     def _should_correct_uncommanded_lane(self, current_wp):
         return self._required_route_lane_before_maneuver(current_wp) is not None
@@ -1240,6 +1586,23 @@ class _TrafficManagerRouteLock:
             log(f"Manual lane change accepted temporarily: road={current_wp.road_id}, lane={current_wp.lane_id}")
 
     def _route_lane_or_temporary_lane(self, world, current_wp, remaining):
+        if self._inside_route_control_window():
+            maneuver_distance = self._distance_to_route_maneuver(self.wp_idx)
+            manual_lane_active = (
+                self._manual_lane_id is not None or
+                self._manual_lane_change_pending
+            )
+            if self._route_return_active and self._locked_lane_id is not None:
+                return self._same_lane_until_junction(world, current_wp, remaining)
+            if not manual_lane_active:
+                return remaining
+            if (maneuver_distance is not None and
+                    maneuver_distance <= self.ROUTE_BLOCK_MANUAL_LANE_CHANGE_DISTANCE_M):
+                self._clear_manual_lane()
+                return remaining
+            if self._manual_lane_id is not None:
+                return self._temporary_lane_until_route_maneuver(world, current_wp, remaining)
+
         route_lane_wp = self._required_route_lane_before_maneuver(current_wp)
         if route_lane_wp is not None:
             self._clear_manual_lane()
@@ -1456,7 +1819,7 @@ class _TrafficManagerRouteLock:
         if heading_dot < 0.50:
             return remaining
 
-        handle = min(max(direct_len * 1.10, 16.0), 32.0)
+        handle = min(max(direct_len * 1.35, 24.0), 48.0)
         p0 = start
         p1 = start + carla.Location(
             x=start_forward.x * handle,
@@ -1476,13 +1839,15 @@ class _TrafficManagerRouteLock:
                 y=start_forward.y * d,
                 z=0.0,
             )
-            for d in (3.0, 6.0, 9.0)
+            for d in (2.5, 5.0, 7.5, 10.0, 12.5)
             if d < direct_len * 0.45
         ]
         blend = [self._bezier_location(p0, p1, p2, p3, t)
-                 for t in (0.04, 0.09, 0.14, 0.19, 0.24, 0.29, 0.34, 0.39,
-                           0.44, 0.49, 0.54, 0.59, 0.64, 0.69, 0.74, 0.79,
-                           0.84, 0.89, 0.94, 0.98)]
+                 for t in (0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.21, 0.24,
+                           0.27, 0.30, 0.33, 0.36, 0.39, 0.42, 0.45, 0.48,
+                           0.51, 0.54, 0.57, 0.60, 0.63, 0.66, 0.69, 0.72,
+                           0.75, 0.78, 0.81, 0.84, 0.87, 0.90, 0.93, 0.96,
+                           0.98)]
         return lead_in + blend + remaining[target_idx:]
 
     def _remaining_before_maneuver(self, remaining):
@@ -1594,23 +1959,68 @@ class _TrafficManagerRouteLock:
         if current_wp is None:
             return False
 
-        nearby = self.waypoints[max(0, idx - 10):min(len(self.waypoints), idx + 24)]
+        nearby = self.waypoints[max(0, idx - 12):min(len(self.waypoints), idx + 36)]
         if not nearby:
             return False
 
+        if getattr(current_wp, "is_junction", False):
+            on_selected_branch = self._junction_branch_reaches_route(current_wp, idx)
+            if on_selected_branch is False:
+                return True
+
         nearest_route_wp = min(nearby, key=lambda wp: loc.distance(wp.transform.location))
-        if loc.distance(nearest_route_wp.transform.location) > 5.0:
+        nearest_dist = loc.distance(nearest_route_wp.transform.location)
+        if nearest_dist > self.ROUTE_STRICT_MATCH_DISTANCE_M:
             return True
 
-        same_route_road = any(
-            wp.road_id == current_wp.road_id and
-            (not getattr(current_wp, "is_junction", False) or wp.section_id == current_wp.section_id)
+        same_route_segment = any(
+            self._current_wp_matches_route_wp(current_wp, wp)
             for wp in nearby
         )
-        if same_route_road:
+        if same_route_segment:
             return False
 
-        return loc.distance(nearest_route_wp.transform.location) > 3.5
+        if getattr(current_wp, "is_junction", False):
+            return nearest_dist > max(getattr(nearest_route_wp, "lane_width", 3.5) * 0.9, 3.5)
+
+        same_road_only = any(wp.road_id == current_wp.road_id for wp in nearby)
+        if same_road_only:
+            return True
+
+        return nearest_dist > max(getattr(nearest_route_wp, "lane_width", 3.5), 4.0)
+
+    def _junction_branch_reaches_route(self, current_wp, idx):
+        maneuver_idx = self._route_maneuver_index(idx)
+        if maneuver_idx is None:
+            return None
+
+        target_wp = self._route_target_after_maneuver(maneuver_idx)
+        if target_wp is None:
+            return None
+
+        if self._same_route_branch(current_wp, target_wp):
+            return True
+
+        score = self._lane_reaches_route_target(current_wp, target_wp)
+        return score is not None
+
+    def _current_wp_matches_route_wp(self, current_wp, route_wp):
+        if current_wp.road_id != route_wp.road_id:
+            return False
+        if current_wp.section_id != route_wp.section_id:
+            return False
+        if not self._same_direction_waypoints(current_wp, route_wp):
+            return False
+
+        if getattr(current_wp, "is_junction", False) or getattr(route_wp, "is_junction", False):
+            return True
+
+        route_lane_ids = {route_wp.lane_id}
+        if self._manual_lane_id is not None:
+            route_lane_ids.add(self._manual_lane_id)
+        if self._locked_lane_id is not None:
+            route_lane_ids.add(self._locked_lane_id)
+        return current_wp.lane_id in route_lane_ids
 
 
 def _start_tm_lane_change(traffic_manager, vehicle, direction, world=None):
