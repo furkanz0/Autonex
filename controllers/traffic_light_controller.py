@@ -31,6 +31,11 @@ from config import (
     TL_RED_HSV_LOW2, TL_RED_HSV_HIGH2,
     TL_GREEN_HSV_LOW, TL_GREEN_HSV_HIGH,
     TL_MIN_AREA, TL_MAX_AREA, TL_MIN_CIRCULARITY,
+    TL_MIN_BBOX_PX, TL_MAX_BBOX_RATIO,
+    TL_MIN_ASPECT_RATIO, TL_MAX_ASPECT_RATIO,
+    TL_MIN_EXTENT, TL_MAX_EXTENT,
+    TL_MIN_DARK_CONTEXT, TL_CONTEXT_PAD_RATIO,
+    TL_CENTER_MARGIN_RATIO,
     TL_ROI_RATIO, TL_CONFIRM_FRAMES, TL_BRAKE_AREA_SCALE,
 )
 
@@ -132,8 +137,8 @@ class CameraTrafficLightDetector:
         green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, self._kernel)
 
         # ── 6. Kontur tespiti ────────────────────────────────────────
-        red_contours = self._find_light_contours(red_mask)
-        green_contours = self._find_light_contours(green_mask)
+        red_contours = self._find_light_contours(red_mask, roi)
+        green_contours = self._find_light_contours(green_mask, roi)
 
         # ── 7. En büyük kontur alanları ──────────────────────────────
         red_best = self._best_contour(red_contours)
@@ -199,7 +204,7 @@ class CameraTrafficLightDetector:
     #  KONTUR FİLTRESİ
     # =================================================================
 
-    def _find_light_contours(self, mask):
+    def _find_light_contours(self, mask, roi):
         """
         Maskeden trafik ışığına benzeyen konturları bul.
         Filtreler: alan aralığı + dairesellik.
@@ -207,9 +212,30 @@ class CameraTrafficLightDetector:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
                                         cv2.CHAIN_APPROX_SIMPLE)
         valid = []
+        roi_h, roi_w = mask.shape[:2]
+        max_bbox_w = max(TL_MIN_BBOX_PX, int(roi_w * TL_MAX_BBOX_RATIO))
+        max_bbox_h = max(TL_MIN_BBOX_PX, int(roi_h * TL_MAX_BBOX_RATIO))
+        x_margin = int(roi_w * TL_CENTER_MARGIN_RATIO)
+
         for cnt in contours:
             area = cv2.contourArea(cnt)
             if area < TL_MIN_AREA or area > TL_MAX_AREA:
+                continue
+
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            if bw < TL_MIN_BBOX_PX or bh < TL_MIN_BBOX_PX:
+                continue
+            if bw > max_bbox_w or bh > max_bbox_h:
+                continue
+            if x < x_margin or x + bw > roi_w - x_margin:
+                continue
+
+            aspect = bw / float(bh)
+            if aspect < TL_MIN_ASPECT_RATIO or aspect > TL_MAX_ASPECT_RATIO:
+                continue
+
+            extent = area / float(bw * bh)
+            if extent < TL_MIN_EXTENT or extent > TL_MAX_EXTENT:
                 continue
 
             # Dairesellik: 4π × alan / çevre²  (daire = 1.0)
@@ -220,9 +246,39 @@ class CameraTrafficLightDetector:
             if circularity < TL_MIN_CIRCULARITY:
                 continue
 
+            if not self._has_dark_light_housing(cnt, mask, roi):
+                continue
+
             valid.append(cnt)
 
         return valid
+
+    @staticmethod
+    def _has_dark_light_housing(cnt, mask, roi):
+        """Check for the dark casing that surrounds CARLA traffic-light lamps."""
+        roi_h, roi_w = mask.shape[:2]
+        x, y, bw, bh = cv2.boundingRect(cnt)
+
+        pad_x = max(4, int(bw * TL_CONTEXT_PAD_RATIO))
+        pad_y = max(6, int(bh * TL_CONTEXT_PAD_RATIO))
+        x1 = max(0, x - pad_x)
+        y1 = max(0, y - pad_y)
+        x2 = min(roi_w, x + bw + pad_x)
+        y2 = min(roi_h, y + bh + pad_y)
+
+        if x2 <= x1 or y2 <= y1:
+            return False
+
+        context = roi[y1:y2, x1:x2]
+        context_mask = mask[y1:y2, x1:x2]
+        gray = cv2.cvtColor(context, cv2.COLOR_BGR2GRAY)
+
+        colored = context_mask > 0
+        dark = (gray < 85) & (~colored)
+        context_pixels = max(1, dark.size - int(np.count_nonzero(colored)))
+        dark_ratio = float(np.count_nonzero(dark)) / context_pixels
+
+        return dark_ratio >= TL_MIN_DARK_CONTEXT
 
     @staticmethod
     def _best_contour(contours):

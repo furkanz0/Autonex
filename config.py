@@ -197,6 +197,15 @@ TL_GREEN_HSV_HIGH = (90, 255, 255)
 TL_MIN_AREA = 60                  # Minimum kontur alanı (piksel²)
 TL_MAX_AREA = 12000               # Maksimum kontur alanı
 TL_MIN_CIRCULARITY = 0.3          # Minimum dairesellik (0-1)
+TL_MIN_BBOX_PX = 6                # Minimum lamp bbox size
+TL_MAX_BBOX_RATIO = 0.16          # Max lamp bbox size relative to frame
+TL_MIN_ASPECT_RATIO = 0.45        # Reject long/thin colored objects
+TL_MAX_ASPECT_RATIO = 1.8
+TL_MIN_EXTENT = 0.35              # Contour fill ratio inside bbox
+TL_MAX_EXTENT = 0.92
+TL_MIN_DARK_CONTEXT = 0.18        # Require dark traffic-light housing around lamp
+TL_CONTEXT_PAD_RATIO = 1.7        # Context expansion around the colored lamp
+TL_CENTER_MARGIN_RATIO = 0.08     # Ignore far-edge color clutter
 
 # — Algılama bölgesi ve doğrulama —
 TL_ROI_RATIO = 0.55               # Görüntünün üst %55'i (ışıklar yukarıda)
