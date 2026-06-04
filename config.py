@@ -230,3 +230,56 @@ LEAD_VEHICLE_SLOW_DISTANCE_M = 24.0
 LEAD_VEHICLE_STOP_DISTANCE_M = 11.0
 LEAD_VEHICLE_LATERAL_MARGIN_M = 2.4
 
+
+# =====================================================================
+#  NPC ARAÇ YÖNETİMİ
+# =====================================================================
+NPC_COUNT            = 8          # Başlangıçta spawn edilecek NPC sayısı
+NPC_SPAWN_RADIUS_M   = 80.0       # Ego araç çevresinde spawn alanı (m)
+NPC_MIN_DIST_M       = 20.0       # Minimum spawn mesafesi (ego'dan)
+NPC_TARGET_SPEED_KMH = 25.0       # NPC hedef hızı (km/h)
+NPC_SAFE_DISTANCE_M  = 10.0       # Traffic Manager güvenli takip mesafesi (m)
+NPC_MODELS = [                    # Kullanılacak araç modelleri (çeşitlilik)
+    "vehicle.tesla.model3",
+    "vehicle.audi.a2",
+    "vehicle.bmw.grandtourer",
+    "vehicle.citroen.c3",
+    "vehicle.dodge.charger_2020",
+    "vehicle.lincoln.mkz_2020",
+    "vehicle.mercedes.coupe",
+    "vehicle.nissan.micra",
+    "vehicle.seat.leon",
+    "vehicle.toyota.prius",
+    "vehicle.volkswagen.t2",
+]
+
+
+# =====================================================================
+#  OPENCV ARAÇ TESPİTİ (Vehicle Detection)
+# =====================================================================
+VD_ROI_TOP_RATIO     = 0.30       # Araç ROI başlangıcı: görüntünün üst %30'u atla
+VD_MIN_AREA          = 1200       # Minimum kontur alanı (piksel²)
+VD_MAX_AREA          = 90000      # Maksimum kontur alanı
+VD_MIN_ASPECT        = 0.6        # Min genişlik/yükseklik oranı (araç şekli)
+VD_MAX_ASPECT        = 6.0        # Max genişlik/yükseklik oranı
+VD_REAL_WIDTH_M      = 1.8        # Ortalama araç genişliği (metre)
+VD_FOCAL_LENGTH_PX   = 554        # 640px genişlik @ 90° FOV focal length
+VD_SAFE_DIST_M       = 18.0       # Güvenli takip mesafesi — ACC yavaşlama başlar
+VD_CRITICAL_DIST_M   = 7.0        # Kritik mesafe — acil fren
+VD_EMERGENCY_DIST_M  = 4.0        # Acil durum mesafesi — tam fren
+VD_CONFIRM_FRAMES    = 2          # Kaç ardışık frame'de görünmeli (false positive azalt)
+VD_MORPH_KERNEL      = 5          # Morfolojik işlem kernel boyutu
+VD_CANNY_LOW         = 40         # Canny alt eşiği
+VD_CANNY_HIGH        = 120        # Canny üst eşiği
+VD_DILATE_ITER       = 2          # Kontur genişletme iterasyon sayısı
+
+
+# =====================================================================
+#  ACC (ADAPTIVE CRUISE CONTROL)
+# =====================================================================
+ACC_FOLLOW_KP        = 0.04       # Hız takip oransal kazancı
+ACC_MAX_THROTTLE     = 0.60       # Maksimum gaz (ACC modunda)
+ACC_BRAKE_KP         = 0.08       # Fren oransal kazancı
+ACC_MAX_BRAKE        = 0.85       # Maksimum fren (ACC modunda)
+ACC_CREEP_THROTTLE   = 0.12       # Yavaş ilerleme gaz değeri
+
