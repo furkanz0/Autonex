@@ -90,7 +90,10 @@ class LaneDashboard:
     def render(self, lane: LaneResult, speed_kmh: float, steer: float,
               frame_no: int, lane_change_state: str = "CENTER",
               target_offset: float = 0.0, tl_state: str = "none",
-              tl_confirmed: bool = False) -> bool:
+              tl_confirmed: bool = False,
+              acc_status: str = "FREE",
+              vehicle_count: int = 0,
+              closest_dist_m: float = float("inf")) -> bool:
         """
         Dashboard'u güncelle ve göster.
 
@@ -109,7 +112,8 @@ class LaneDashboard:
 
         # ── Panel 3: Telemetry Dashboard ─────────────────────────────
         self._draw_telemetry(canvas, lane, speed_kmh, steer, frame_no,
-                             lane_change_state, target_offset, tl_state, tl_confirmed)
+                             lane_change_state, target_offset, tl_state, tl_confirmed,
+                             acc_status, vehicle_count, closest_dist_m)
 
         # ── Göster ───────────────────────────────────────────────────
         cv2.imshow(self._window, canvas)
@@ -229,7 +233,10 @@ class LaneDashboard:
     def _draw_telemetry(self, canvas, lane: LaneResult, speed_kmh: float,
                         steer: float, frame_no: int, lane_state: str,
                         target_offset: float, tl_state: str = "none",
-                        tl_confirmed: bool = False):
+                        tl_confirmed: bool = False,
+                        acc_status: str = "FREE",
+                        vehicle_count: int = 0,
+                        closest_dist_m: float = float("inf")):
         """Alt panel: hız, offset, steer, kontroller."""
         y0 = self._CAM_H
         panel = canvas[y0:y0 + self._DASH_H, 0:self._TOTAL_W]
@@ -302,6 +309,21 @@ class LaneDashboard:
             if tl_confirmed: tl_txt += " (!)"
             tl_col = self._RED if tl_state == "red" else self._GREEN
             cv2.putText(canvas, tl_txt, (810, r2_y), self._FONT, 0.4, tl_col, 1, cv2.LINE_AA)
+
+        # ── ACC + Araç Tespiti göstergesi ───────────────────────────
+        acc_colors = {
+            "FREE":      self._GREEN,
+            "FOLLOWING": self._CYAN,
+            "BRAKING":   self._ORANGE,
+            "EMERGENCY": self._RED,
+        }
+        acc_col = acc_colors.get(acc_status, self._GRAY)
+        cv2.putText(canvas, "ACC", (15, r2_y + 35), self._FONT, 0.4, self._GRAY, 1, cv2.LINE_AA)
+        cv2.putText(canvas, acc_status, (60, r2_y + 35), self._FONT, 0.5, acc_col, 1, cv2.LINE_AA)
+        if vehicle_count > 0:
+            dist_str = f"{closest_dist_m:.1f}m" if closest_dist_m < 999 else "--"
+            cv2.putText(canvas, f"NPC:{vehicle_count}  {dist_str}",
+                        (200, r2_y + 35), self._FONT, 0.45, acc_col, 1, cv2.LINE_AA)
 
         # ── Satır 3: Kontrol bilgisi ─────────────────────────────────
         r3_y = y0 + 100

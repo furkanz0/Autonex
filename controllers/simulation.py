@@ -266,9 +266,12 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     from views.lane_camera import LaneCamera
     from views.lane_dashboard import LaneDashboard
     from views.traffic_light_panel import TrafficLightPanel
+    from views.vehicle_detection_panel import VehicleDetectionPanel
     from models.lane_detector import LaneDetector
+    from models.vehicle_detector import VehicleDetector
     from controllers.lane_controller import LaneController
     from controllers.traffic_light_controller import CameraTrafficLightDetector
+    from controllers.traffic_rules_engine import TrafficRulesEngine
 
     sec("6 – Simulation Loop  (Pure Vision Mode)")
 
@@ -279,6 +282,9 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     dashboard = LaneDashboard()
     tl_panel = TrafficLightPanel(window_x=0, window_y=530)  # Lane Dashboard'un altı
     tl_detector = CameraTrafficLightDetector()
+    veh_detector = VehicleDetector()
+    rules_engine = TrafficRulesEngine(target_speed_kmh=30.0)
+    veh_panel = VehicleDetectionPanel(window_x=560, window_y=530)
     keyboard = LaneChangeKeyboard()
     spec = world.get_spectator()
     traffic_manager = None
@@ -372,6 +378,9 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         # ── Detect traffic lights (OpenCV HSV) ────────────────────────
         tl_result = tl_detector.process(raw)
 
+        # ── Detect vehicles (OpenCV) ──────────────────────────────────
+        veh_result = veh_detector.process(raw)
+
         # ── Compute speed ────────────────────────────────────────────
         vel = vehicle.get_velocity()
         spd = 3.6 * math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
@@ -380,6 +389,15 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         loc = vehicle.get_location()
         wp = world.get_map().get_waypoint(loc)
         in_junction = wp.is_junction if wp else False
+
+        # ── Trafik Kuralları Motoru kararı ────────────────────────────
+        last_steer = float(controller.last_pid.get("steer", 0.0))
+        rules_decision = rules_engine.decide(
+            tl_result=tl_result,
+            vehicle_result=veh_result,
+            current_speed_kmh=spd,
+            last_steer=last_steer,
+        )
 
         # ── Compute control ──────────────────────────────────────────
         # Kırmızı ışık varsa, Traffic Manager olsun ya da olmasın kameraya uy
@@ -406,6 +424,12 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
 
         if tl_stop_ctrl is not None:
             ctrl = tl_stop_ctrl
+            vehicle.apply_control(ctrl)
+        elif rules_decision.override:
+            # Trafik Kuralları Motoru devreye girdi (EMERGENCY / RED_LIGHT / ACC)
+            ctrl = rules_decision.to_carla_control()
+            if traffic_manager is not None:
+                vehicle.set_autopilot(False)
             vehicle.apply_control(ctrl)
         elif obey_camera_light:
             # Kırmızı ışık — fren uygula, mevcut direksiyonu koru
@@ -457,14 +481,23 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                 lane_result, spd, ctrl.steer, frame,
                 lane_state_ui, controller.target_offset_m,
                 tl_state=tl_result.state,
-                tl_confirmed=tl_result.confirmed):
+                tl_confirmed=tl_result.confirmed,
+                acc_status=veh_result.status,
+                vehicle_count=veh_result.vehicle_count,
+                closest_dist_m=veh_result.closest_distance_m):
             print("\n  [!] Window closed")
             vehicle.set_autopilot(False)
-            _cleanup_lane(cam, dashboard, tl_panel, minimap)
+            _cleanup_lane(cam, dashboard, tl_panel, minimap, veh_panel)
             return {"ok": False, "f": frame, "t": elapsed}
 
         # ── Traffic Light Panel (sunum penceresi) ─────────────────────
         tl_panel.render(tl_result, raw, spd, ctrl)
+
+        # ── Vehicle Detection Panel ──────────────────────────────
+        veh_panel.render(
+            veh_result, raw, spd,
+            acc_decision=rules_decision.acc_decision
+        )
 
         # ── MiniMap ──────────────────────────────────────────────────
         if minimap and waypoints:
@@ -570,11 +603,11 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         if elapsed > MAX_S:
             print(f"\n  [!] Timeout ({MAX_S}s)")
             vehicle.set_autopilot(False)
-            _cleanup_lane(cam, dashboard, tl_panel, minimap)
+            _cleanup_lane(cam, dashboard, tl_panel, minimap, veh_panel)
             return {"ok": False, "f": frame, "t": elapsed}
 
     vehicle.set_autopilot(False)
-    _cleanup_lane(cam, dashboard, tl_panel, minimap)
+    _cleanup_lane(cam, dashboard, tl_panel, minimap, veh_panel)
     return {"ok": False, "f": frame, "t": time.time() - t0}
 
 
@@ -582,8 +615,8 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
 #  LANE MODE YARDIMCI FONKSİYONLAR
 # =====================================================================
 
-def _cleanup_lane(cam, dashboard, tl_panel=None, minimap=None):
-    """Destroy camera, dashboard, traffic light panel, and optional minimap."""
+def _cleanup_lane(cam, dashboard, tl_panel=None, minimap=None, veh_panel=None):
+    """Destroy camera, dashboard, traffic light panel, vehicle panel, and optional minimap."""
     try:
         cam.destroy()
     except Exception:
@@ -600,6 +633,11 @@ def _cleanup_lane(cam, dashboard, tl_panel=None, minimap=None):
     if minimap:
         try:
             minimap.destroy()
+        except Exception:
+            pass
+    if veh_panel:
+        try:
+            veh_panel.destroy()
         except Exception:
             pass
 

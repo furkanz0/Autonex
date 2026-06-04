@@ -22,6 +22,7 @@ from utils.logger import log, sec
 from models.connection import connect, load_town10, sync_on, sync_off
 from models.vehicle import spawn_tesla, settle_physics, motion_test
 from models.route import pick_spawn, snap_end, build_route
+from models.npc_manager import NpcManager
 
 from views.map_navigator import MapNavigator
 from views.minimap import MiniMap
@@ -46,12 +47,18 @@ def run_with_map(client, world, wmap, orig):
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
 
+    # NPC
+    npc_manager = NpcManager(client, world)
+
     # Spawn & vehicle — aynı spawn noktasını kullan
     spawn_tf = pick_spawn(wmap, start, end)
     vehicle = spawn_tesla(world, spawn_tf)
     settle_physics(world, ticks=15)
     time.sleep(0.2)
     motion_test(world, vehicle)
+
+    # NPC araçları ego araç spawn olduktan sonra yerleştir
+    npc_manager.spawn(ego_vehicle=vehicle)
 
     # Navigator'dan gelen rotayı kullan (haritada görünen rota)
     if len(nav_waypoints) >= 2:
@@ -82,6 +89,7 @@ def run_with_map(client, world, wmap, orig):
     print(f"  Time   : {sim_result['t']:.1f}s")
     print(f"  Frames : {sim_result['f']}")
 
+    npc_manager.destroy_all()
     try:
         if vehicle.is_alive:
             vehicle.set_autopilot(False)
@@ -94,21 +102,26 @@ def run_with_map(client, world, wmap, orig):
 def run_default(client, world, wmap, orig):
     """Test with default (hardcoded) route."""
     vehicle = None
+    npc_manager = None
 
     try:
-        # ── Spawn & target ───────────────────────────────────────────
+        # ── Spawn & target ─────────────────────────────────────
         spawn_tf = pick_spawn(wmap, WANT_START, WANT_END)
         end_loc  = snap_end(wmap, WANT_END)
 
-        # ── Vehicle ──────────────────────────────────────────────────
+        # ── Vehicle ──────────────────────────────────────────
         vehicle = spawn_tesla(world, spawn_tf)
 
-        # ── Physics settling ─────────────────────────────────────────
+        # ── Physics settling ────────────────────────────────────
         settle_physics(world, ticks=15)
         time.sleep(0.2)
 
-        # ── Motion diagnostics ───────────────────────────────────────
+        # ── Motion diagnostics ──────────────────────────────────
         motion_test(world, vehicle)
+
+        # ── NPC araçlar ──────────────────────────────────────
+        npc_manager = NpcManager(client, world)
+        npc_manager.spawn(ego_vehicle=vehicle)
 
         # ── Route ────────────────────────────────────────────────────
         start_loc = vehicle.get_location()
@@ -132,6 +145,8 @@ def run_default(client, world, wmap, orig):
         print(f"  Frames : {result['f']}")
 
     finally:
+        if npc_manager:
+            npc_manager.destroy_all()
         if vehicle:
             try:
                 if vehicle.is_alive:
@@ -149,17 +164,22 @@ def run_default(client, world, wmap, orig):
 def run_lane_default(client, world, wmap, orig):
     """Lane following with default (hardcoded) route."""
     vehicle = None
+    npc_manager = None
 
     try:
-        # ── Spawn & target ───────────────────────────────────────────
+        # ── Spawn & target ─────────────────────────────────────
         spawn_tf = pick_spawn(wmap, WANT_START, WANT_END)
         end_loc  = snap_end(wmap, WANT_END)
 
-        # ── Vehicle ──────────────────────────────────────────────────
+        # ── Vehicle ──────────────────────────────────────────
         vehicle = spawn_tesla(world, spawn_tf)
         settle_physics(world, ticks=15)
         time.sleep(0.2)
         motion_test(world, vehicle)
+
+        # ── NPC araçlar ──────────────────────────────────────
+        npc_manager = NpcManager(client, world)
+        npc_manager.spawn(ego_vehicle=vehicle)
 
         # ── Ana döngü (Lane Following) ────────────────────────────────
         # run_lane kendi kamera, detector, controller, dashboard'unu oluşturur
@@ -185,6 +205,8 @@ def run_lane_default(client, world, wmap, orig):
         print(f"  Frames : {result['f']}")
 
     finally:
+        if npc_manager:
+            npc_manager.destroy_all()
         if vehicle:
             try:
                 if vehicle.is_alive:
@@ -217,6 +239,10 @@ def run_lane_with_map(client, world, wmap, orig):
     settle_physics(world, ticks=15)
     time.sleep(0.2)
     motion_test(world, vehicle)
+
+    # NPC araçlar
+    npc_manager = NpcManager(client, world)
+    npc_manager.spawn(ego_vehicle=vehicle)
 
     # Hedef konum
     end_loc = snap_end(wmap, end)
@@ -254,6 +280,7 @@ def run_lane_with_map(client, world, wmap, orig):
     print(f"  Time   : {sim_result['t']:.1f}s")
     print(f"  Frames : {sim_result['f']}")
 
+    npc_manager.destroy_all()
     try:
         if vehicle.is_alive:
             vehicle.set_autopilot(False)
