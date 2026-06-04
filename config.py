@@ -211,4 +211,22 @@ TL_CENTER_MARGIN_RATIO = 0.08     # Ignore far-edge color clutter
 TL_ROI_RATIO = 0.55               # Görüntünün üst %55'i (ışıklar yukarıda)
 TL_CONFIRM_FRAMES = 3             # Tepki için ardışık tespit frame sayısı
 TL_BRAKE_AREA_SCALE = 2000.0      # Fren yoğunluğu alan ölçeği
+TL_WORLD_VALIDATE_DISTANCE_M = 35.0
+TL_WORLD_VALIDATE_LATERAL_M = 12.0
+
+# =====================================================================
+#  NPC TRAFFIC
+# =====================================================================
+NPC_TRAFFIC_ENABLED = True
+NPC_TRAFFIC_COUNT = 100            # Dense traffic; may affect performance
+NPC_TRAFFIC_SEED = 42
+NPC_MIN_EGO_SPAWN_DISTANCE_M = 35.0
+NPC_SPEED_DIFF_PERCENT = 15.0      # Positive means NPCs drive a little slower
+NPC_FOLLOW_DISTANCE_M = 2.0
+NPC_SPAWN_SETTLE_TICKS = 8
+
+# Extra safety for locally controlled waypoint/PID driving.
+LEAD_VEHICLE_SLOW_DISTANCE_M = 24.0
+LEAD_VEHICLE_STOP_DISTANCE_M = 11.0
+LEAD_VEHICLE_LATERAL_MARGIN_M = 2.4
 

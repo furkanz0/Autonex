@@ -13,6 +13,15 @@ if HAS_GRP:
     from agents.navigation.global_route_planner import GlobalRoutePlanner
 
 
+ROUTE_TARGET_TRIM_M = 6.0
+ROUTE_MIN_TAIL_TO_TRIM = 8
+ROUTE_LOOP_CLOSE_M = 8.0
+ROUTE_LOOP_MIN_SPAN = 24
+ROUTE_CANDIDATE_RADIUS_M = 16.0
+ROUTE_MAX_CANDIDATES = 10
+ROUTE_MAX_END_OFFSET_M = 7.5
+
+
 def pick_spawn(wmap, near, toward):
     """
     Returns a safe spawn transform exactly at the 'near' location,
@@ -101,13 +110,16 @@ def build_route(wmap, start_loc, end_loc, world):
     if HAS_GRP:
         try:
             grp   = GlobalRoutePlanner(wmap, sampling_resolution=2.0)
-            route = grp.trace_route(start_loc, end_loc)
-            wps   = [r[0] for r in route]
-            if len(wps) > 0:
-                log(f"GlobalRoutePlanner: {len(wps)} waypoints")
-                return wps
-            else:
-                print(f"  [!] GRP returned {len(wps)} waypoints, falling back")
+            candidates = _ranked_route_candidates(wmap, grp, start_loc, end_loc)
+            if candidates:
+                best = candidates[0]
+                log(
+                    f"GlobalRoutePlanner best lane route: {len(best['wps'])} waypoints "
+                    f"(score {best['score']:.1f}, length {best['length']:.1f}m)"
+                )
+                return best["wps"]
+            print("  [!] GRP returned no route that reaches the selected END point")
+            return []
         except Exception as e:
             print(f"  [!] GRP error: {e}, falling back to .next() chain")
 
@@ -143,5 +155,192 @@ def build_route(wmap, start_loc, end_loc, world):
 
         prev_dist = min(prev_dist, best_dist)
 
+    wps = _postprocess_route(wps, end_loc)
     log(f"next() chain: {len(wps)} waypoints")
     return wps
+
+
+def _ranked_route_candidates(wmap, grp, start_loc, end_loc):
+    start_candidates = _nearby_driving_waypoints(wmap, start_loc, toward=end_loc)
+    end_candidates = _nearby_driving_waypoints(wmap, end_loc)
+    ranked = []
+
+    for start_wp in start_candidates:
+        for end_wp in end_candidates:
+            route = grp.trace_route(
+                start_wp.transform.location,
+                end_wp.transform.location,
+            )
+            wps = [r[0] for r in route]
+            if len(wps) < 2:
+                continue
+
+            wps = _postprocess_route(wps, end_wp.transform.location)
+            if len(wps) < 2:
+                continue
+
+            length = _route_length(wps)
+            start_dist = start_loc.distance(wps[0].transform.location)
+            end_dist = end_loc.distance(wps[-1].transform.location)
+            if end_dist > ROUTE_MAX_END_OFFSET_M:
+                continue
+            score = length + start_dist * 3.0 + end_dist * 25.0
+            ranked.append({
+                "wps": wps,
+                "score": score,
+                "length": length,
+                "start_dist": start_dist,
+                "end_dist": end_dist,
+            })
+
+    ranked.sort(key=lambda item: item["score"])
+    if ranked:
+        best = ranked[0]
+        log(
+            f"Route lane candidates: {len(ranked)} valid, "
+            f"start offset {best['start_dist']:.1f}m, "
+            f"end offset {best['end_dist']:.1f}m",
+            "~",
+        )
+    return ranked
+
+
+def _nearby_driving_waypoints(wmap, loc, toward=None):
+    base = wmap.get_waypoint(
+        loc, project_to_road=True, lane_type=carla.LaneType.Driving)
+    if not base:
+        return []
+
+    candidates = []
+    seen = set()
+
+    def add(wp):
+        if not wp or wp.lane_type != carla.LaneType.Driving:
+            return
+        if wp.transform.location.distance(loc) > ROUTE_CANDIDATE_RADIUS_M:
+            return
+        key = (wp.road_id, wp.section_id, wp.lane_id, round(wp.s, 1))
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(wp)
+
+    add(base)
+    add(base.get_left_lane())
+    add(base.get_right_lane())
+
+    yaw = math.radians(base.transform.rotation.yaw)
+    lat_dx, lat_dy = -math.sin(yaw), math.cos(yaw)
+    for dist in (3.5, 7.0, 10.5, 14.0):
+        for sign in (-1.0, 1.0):
+            probe = carla.Location(
+                x=loc.x + lat_dx * dist * sign,
+                y=loc.y + lat_dy * dist * sign,
+                z=loc.z,
+            )
+            add(wmap.get_waypoint(
+                probe, project_to_road=True,
+                lane_type=carla.LaneType.Driving))
+
+    if toward:
+        tx = toward.x - loc.x
+        ty = toward.y - loc.y
+        mag = math.sqrt(tx * tx + ty * ty) or 1.0
+        tx, ty = tx / mag, ty / mag
+
+        def direction_penalty(wp):
+            yaw_rad = math.radians(wp.transform.rotation.yaw)
+            dot = math.cos(yaw_rad) * tx + math.sin(yaw_rad) * ty
+            return 0.0 if dot >= 0.0 else 25.0
+    else:
+        def direction_penalty(wp):
+            return 0.0
+
+    candidates.sort(key=lambda wp: (
+        direction_penalty(wp) + wp.transform.location.distance(loc),
+        abs(wp.lane_id),
+    ))
+    return candidates[:ROUTE_MAX_CANDIDATES]
+
+
+def _route_length(wps):
+    total = 0.0
+    for prev, cur in zip(wps, wps[1:]):
+        total += prev.transform.location.distance(cur.transform.location)
+    return total
+
+
+def _postprocess_route(wps, end_loc):
+    original = list(wps)
+    wps = _remove_route_loops(wps)
+    wps = _trim_route_near_target(wps, end_loc)
+    if original and wps:
+        original_end_dist = original[-1].transform.location.distance(end_loc)
+        processed_end_dist = wps[-1].transform.location.distance(end_loc)
+        if processed_end_dist > max(ROUTE_MAX_END_OFFSET_M, original_end_dist + 2.0):
+            log("Route cleanup skipped: it moved the route away from target", "!")
+            return original
+    return wps
+
+
+def _trim_route_near_target(wps, end_loc):
+    """
+    Cut route tails that loop around after already passing the selected target.
+    This keeps map-selected routes from drawing large block loops near the end.
+    """
+    if not wps or len(wps) < 3:
+        return wps
+
+    best_idx = None
+    best_dist = float("inf")
+    for idx, wp in enumerate(wps):
+        try:
+            dist = wp.transform.location.distance(end_loc)
+        except Exception:
+            continue
+        if dist < best_dist:
+            best_dist = dist
+            best_idx = idx
+
+    if best_idx is None:
+        return wps
+
+    tail_len = len(wps) - best_idx - 1
+    if best_dist <= ROUTE_TARGET_TRIM_M and tail_len >= ROUTE_MIN_TAIL_TO_TRIM:
+        trimmed = wps[:best_idx + 1]
+        log(
+            f"Route tail trimmed near target: {len(wps)} -> {len(trimmed)} "
+            f"(closest {best_dist:.1f}m)",
+            "~",
+        )
+        return trimmed
+
+    return wps
+
+
+def _remove_route_loops(wps):
+    """Remove obvious geometric loops where the route returns near an old point."""
+    if not wps or len(wps) < ROUTE_LOOP_MIN_SPAN:
+        return wps
+
+    cleaned = list(wps)
+    changed = True
+    while changed:
+        changed = False
+        for i in range(0, len(cleaned) - ROUTE_LOOP_MIN_SPAN):
+            loc_i = cleaned[i].transform.location
+            for j in range(len(cleaned) - 1, i + ROUTE_LOOP_MIN_SPAN, -1):
+                loc_j = cleaned[j].transform.location
+                if loc_i.distance(loc_j) > ROUTE_LOOP_CLOSE_M:
+                    continue
+
+                # Keep the later waypoint so heading/road context remains current.
+                before = len(cleaned)
+                cleaned = cleaned[:i + 1] + cleaned[j:]
+                log(f"Route loop removed: {before} -> {len(cleaned)} waypoints", "~")
+                changed = True
+                break
+            if changed:
+                break
+
+    return cleaned

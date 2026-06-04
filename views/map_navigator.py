@@ -57,6 +57,8 @@ class MapNavigator:
     MARGIN = 60
     POINT_R = 8
     SCREENSHOT_DIR = "screenshots"
+    HUD_W, HUD_H = 280, 260
+    HUD_X, HUD_Y = WIN_W - HUD_W - 10, 10
 
     def __init__(self, world):
         if not HAS_PYGAME:
@@ -90,6 +92,7 @@ class MapNavigator:
         # Route waypoints (pixels)
         self._route_pixels = []
         self._route_wps = []     # carla.Waypoint list
+        self._route_end_loc = None
 
         # Store world-coordinate road segments for precise clicking
         self._world_road_segments = []  # (wx1, wy1, wx2, wy2) in world coords
@@ -219,27 +222,22 @@ class MapNavigator:
         if not self.start_loc or not self.end_loc:
             self._route_pixels = []
             self._route_wps = []
+            self._route_end_loc = None
             return
 
         try:
-            from models.route import build_route, snap_directed, snap_end, pick_spawn
-            
-            # Snap start location to the actual spawn point the simulation will use
-            spawn_tf = pick_spawn(self.wmap, self.start_loc, self.end_loc)
-            if spawn_tf:
-                aligned_start = spawn_tf.location
-                # Optionally, update the visual start_loc so the green circle matches the spawn point
-                self.start_loc = aligned_start
-            else:
-                aligned_start = snap_directed(self.wmap, self.start_loc, self.end_loc)
-                
-            aligned_end = snap_end(self.wmap, self.end_loc)
-            
-            self._route_wps = build_route(self.wmap, aligned_start, aligned_end, self.world)
+            from models.route import build_route
+
+            self._route_end_loc = None
+            self._route_wps = build_route(
+                self.wmap, self.start_loc, self.end_loc, self.world)
             self._route_pixels = []
             for wp in self._route_wps:
                 self._route_pixels.append(
                     self._world_to_base(wp.transform.location))
+            if self._route_wps:
+                self.start_loc = self._route_wps[0].transform.location
+                self._route_end_loc = self._route_wps[-1].transform.location
             log(f"MapNavigator route computed: {len(self._route_wps)} waypoints")
         except Exception as e:
             log(f"Route compute error: {e}", "!")
@@ -249,6 +247,7 @@ class MapNavigator:
                 self._world_to_base(self.end_loc),
             ]
             self._route_wps = []
+            self._route_end_loc = None
 
     # ─── Screenshot ──────────────────────────────────────────────────────
 
@@ -321,9 +320,9 @@ class MapNavigator:
 
     def _draw_hud(self, surface, font, font_sm):
         """Draw the info panel."""
-        panel = pygame.Surface((280, 260), pygame.SRCALPHA)
+        panel = pygame.Surface((self.HUD_W, self.HUD_H), pygame.SRCALPHA)
         panel.fill(COL_PANEL)
-        surface.blit(panel, (10, 10))
+        surface.blit(panel, (self.HUD_X, self.HUD_Y))
 
         lines = [
             ("MAP NAVIGATOR", COL_ROUTE),
@@ -336,26 +335,26 @@ class MapNavigator:
             ("ENTER       -> Run Test", COL_ROUTE),
             ("ESC         -> Exit", (150, 150, 150)),
         ]
-        y = 18
+        y = self.HUD_Y + 8
         for txt, col in lines:
             if txt:
                 ts = font_sm.render(txt, True, col)
-                surface.blit(ts, (20, y))
+                surface.blit(ts, (self.HUD_X + 10, y))
             y += 24
 
         # Selected coordinates
         y += 4
         if self.start_loc:
             t = f"Start: ({self.start_loc.x:.0f}, {self.start_loc.y:.0f})"
-            surface.blit(font_sm.render(t, True, COL_START), (20, y))
+            surface.blit(font_sm.render(t, True, COL_START), (self.HUD_X + 10, y))
         y += 20
         if self.end_loc:
             t = f"End:   ({self.end_loc.x:.0f}, {self.end_loc.y:.0f})"
-            surface.blit(font_sm.render(t, True, COL_END), (20, y))
+            surface.blit(font_sm.render(t, True, COL_END), (self.HUD_X + 10, y))
 
         # Zoom info
         zt = font_sm.render(f"Zoom: {self._zoom:.1f}x", True, (120, 120, 120))
-        surface.blit(zt, (self.WIN_W - 120, self.WIN_H - 30))
+        surface.blit(zt, (self.HUD_X + 10, y + 24))
 
     # ─── Snap to Road ────────────────────────────────────────────────────
 
@@ -404,8 +403,8 @@ class MapNavigator:
         """Pan the map so the given world point is centered, offset for HUD panel."""
         bx, by = self._world_to_base(loc)
         cx, cy = self.WIN_W / 2, self.WIN_H / 2
-        # Offset 140px to the right to avoid the 280px HUD panel
-        target_sx = cx + 140
+        # Offset left to keep the selected point away from the right-side HUD panel.
+        target_sx = cx - 140
         target_sy = cy
         # Solve for pan: target_sx = (bx - cx) * zoom + cx + pan_x
         self._pan_x = target_sx - (bx - cx) * self._zoom - cx
@@ -448,6 +447,7 @@ class MapNavigator:
                             result = {
                                 "start": self.start_loc,
                                 "end": self.end_loc,
+                                "route_end": self._route_end_loc or self.end_loc,
                                 "waypoints": self._route_wps,
                             }
                             running = False

@@ -22,6 +22,7 @@ from utils.logger import log, sec
 from models.connection import connect, load_town10, sync_on, sync_off
 from models.vehicle import spawn_tesla, settle_physics, motion_test
 from models.route import pick_spawn, snap_end, build_route
+from models.traffic import spawn_light_traffic, destroy_traffic
 
 from views.map_navigator import MapNavigator
 from views.minimap import MiniMap
@@ -32,6 +33,8 @@ from controllers.simulation import run, run_lane
 def run_with_map(client, world, wmap, orig):
     """Interactive route selection via map navigator and test."""
     sec("MAP NAVIGATOR MODE")
+    vehicle = None
+    traffic_actors = []
     nav = MapNavigator(world)
     result = nav.run()
 
@@ -41,59 +44,64 @@ def run_with_map(client, world, wmap, orig):
 
     start = result["start"]
     end = result["end"]
+    route_end = result.get("route_end", end)
     nav_waypoints = result.get("waypoints", [])
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
 
-    # Spawn & vehicle — aynı spawn noktasını kullan
-    spawn_tf = pick_spawn(wmap, start, end)
-    vehicle = spawn_tesla(world, spawn_tf)
-    settle_physics(world, ticks=15)
-    time.sleep(0.2)
-    motion_test(world, vehicle)
-
-    # Navigator'dan gelen rotayı kullan (haritada görünen rota)
-    if len(nav_waypoints) >= 2:
-        waypoints = nav_waypoints
-        log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
-    else:
-        # Fallback: tekrar hesapla
-        end_snapped = snap_end(wmap, end)
-        waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
-
-    if len(waypoints) < 2:
-        print("[ERROR] Could not compute route!")
-        vehicle.destroy()
-        return
-
-    end_loc = waypoints[-1].transform.location
-
-    # Mini-Map & simulation
-    minimap = MiniMap(world)
-    
-    for _ in range(3):
-        world.tick()
-
-    sim_result = run(world, vehicle, waypoints, wmap, end_loc, minimap=minimap)
-
-    sec("RESULT")
-    print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
-    print(f"  Time   : {sim_result['t']:.1f}s")
-    print(f"  Frames : {sim_result['f']}")
-
     try:
-        if vehicle.is_alive:
-            vehicle.set_autopilot(False)
-            vehicle.destroy()
-            log("Vehicle destroyed.")
-    except Exception:
-        pass
+        # Spawn & vehicle — aynı spawn noktasını kullan
+        spawn_tf = pick_spawn(wmap, start, end)
+        vehicle = spawn_tesla(world, spawn_tf)
+        settle_physics(world, ticks=15)
+        time.sleep(0.2)
+        motion_test(world, vehicle)
+        traffic_actors = spawn_light_traffic(client, world, vehicle)
+
+        # Navigator'dan gelen rotayı kullan (haritada görünen rota)
+        if len(nav_waypoints) >= 2:
+            waypoints = nav_waypoints
+            log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
+        else:
+            # Fallback: tekrar hesapla
+            end_snapped = snap_end(wmap, end)
+            waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
+
+        if len(waypoints) < 2:
+            print("[ERROR] Could not compute route!")
+            return
+
+        end_loc = snap_end(wmap, route_end)
+
+        # Mini-Map & simulation
+        minimap = MiniMap(world)
+        
+        for _ in range(3):
+            world.tick()
+
+        sim_result = run(world, vehicle, waypoints, wmap, end_loc, minimap=minimap)
+
+        sec("RESULT")
+        print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
+        print(f"  Time   : {sim_result['t']:.1f}s")
+        print(f"  Frames : {sim_result['f']}")
+
+    finally:
+        destroy_traffic(traffic_actors)
+        try:
+            if vehicle and vehicle.is_alive:
+                vehicle.set_autopilot(False)
+                vehicle.destroy()
+                log("Vehicle destroyed.")
+        except Exception:
+            pass
 
 
 def run_default(client, world, wmap, orig):
     """Test with default (hardcoded) route."""
     vehicle = None
+    traffic_actors = []
 
     try:
         # ── Spawn & target ───────────────────────────────────────────
@@ -109,6 +117,7 @@ def run_default(client, world, wmap, orig):
 
         # ── Motion diagnostics ───────────────────────────────────────
         motion_test(world, vehicle)
+        traffic_actors = spawn_light_traffic(client, world, vehicle)
 
         # ── Route ────────────────────────────────────────────────────
         start_loc = vehicle.get_location()
@@ -132,6 +141,7 @@ def run_default(client, world, wmap, orig):
         print(f"  Frames : {result['f']}")
 
     finally:
+        destroy_traffic(traffic_actors)
         if vehicle:
             try:
                 if vehicle.is_alive:
@@ -149,6 +159,7 @@ def run_default(client, world, wmap, orig):
 def run_lane_default(client, world, wmap, orig):
     """Lane following with default (hardcoded) route."""
     vehicle = None
+    traffic_actors = []
 
     try:
         # ── Spawn & target ───────────────────────────────────────────
@@ -160,6 +171,7 @@ def run_lane_default(client, world, wmap, orig):
         settle_physics(world, ticks=15)
         time.sleep(0.2)
         motion_test(world, vehicle)
+        traffic_actors = spawn_light_traffic(client, world, vehicle)
 
         # ── Ana döngü (Lane Following) ────────────────────────────────
         # run_lane kendi kamera, detector, controller, dashboard'unu oluşturur
@@ -185,6 +197,7 @@ def run_lane_default(client, world, wmap, orig):
         print(f"  Frames : {result['f']}")
 
     finally:
+        destroy_traffic(traffic_actors)
         if vehicle:
             try:
                 if vehicle.is_alive:
@@ -198,6 +211,8 @@ def run_lane_default(client, world, wmap, orig):
 def run_lane_with_map(client, world, wmap, orig):
     """Map navigator + lane following."""
     sec("MAP NAVIGATOR + LANE FOLLOWING MODE")
+    vehicle = None
+    traffic_actors = []
     nav = MapNavigator(world)
     result = nav.run()
 
@@ -207,60 +222,65 @@ def run_lane_with_map(client, world, wmap, orig):
 
     start = result["start"]
     end = result["end"]
+    route_end = result.get("route_end", end)
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
 
-    # Spawn & vehicle
-    spawn_tf = pick_spawn(wmap, start, end)
-    vehicle = spawn_tesla(world, spawn_tf)
-    settle_physics(world, ticks=15)
-    time.sleep(0.2)
-    motion_test(world, vehicle)
-
-    # Hedef konum
-    end_loc = snap_end(wmap, end)
-
-    nav_waypoints = result.get("waypoints", [])
-    if len(nav_waypoints) >= 2:
-        waypoints = nav_waypoints
-        log(f"Using navigator route for lane lock: {len(waypoints)} waypoints")
-    else:
-        waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
-        log(f"Computed fallback lane lock route: {len(waypoints)} waypoints")
-
-    if len(waypoints) < 2:
-        print("[ERROR] Could not compute lane lock route!")
-        return
-
-    # Mini-Map
-    minimap = MiniMap(world)
-
-    for _ in range(3):
-        world.tick()
-
-    # Lane following — run_lane kendi bileşenlerini oluşturur
-    sim_result = run_lane(
-        world,
-        vehicle,
-        end_loc=end_loc,
-        client=client,
-        waypoints=waypoints,
-        minimap=minimap,
-    )
-
-    sec("RESULT")
-    print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
-    print(f"  Time   : {sim_result['t']:.1f}s")
-    print(f"  Frames : {sim_result['f']}")
-
     try:
-        if vehicle.is_alive:
-            vehicle.set_autopilot(False)
-            vehicle.destroy()
-            log("Vehicle destroyed.")
-    except Exception:
-        pass
+        # Spawn & vehicle
+        spawn_tf = pick_spawn(wmap, start, end)
+        vehicle = spawn_tesla(world, spawn_tf)
+        settle_physics(world, ticks=15)
+        time.sleep(0.2)
+        motion_test(world, vehicle)
+        traffic_actors = spawn_light_traffic(client, world, vehicle)
+
+        # Hedef konum
+        end_loc = snap_end(wmap, route_end)
+
+        nav_waypoints = result.get("waypoints", [])
+        if len(nav_waypoints) >= 2:
+            waypoints = nav_waypoints
+            log(f"Using navigator route for lane lock: {len(waypoints)} waypoints")
+        else:
+            waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
+            log(f"Computed fallback lane lock route: {len(waypoints)} waypoints")
+
+        if len(waypoints) < 2:
+            print("[ERROR] Could not compute lane lock route!")
+            return
+
+        # Mini-Map
+        minimap = MiniMap(world)
+
+        for _ in range(3):
+            world.tick()
+
+        # Lane following — run_lane kendi bileşenlerini oluşturur
+        sim_result = run_lane(
+            world,
+            vehicle,
+            end_loc=end_loc,
+            client=client,
+            waypoints=waypoints,
+            minimap=minimap,
+        )
+
+        sec("RESULT")
+        print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
+        print(f"  Time   : {sim_result['t']:.1f}s")
+        print(f"  Frames : {sim_result['f']}")
+
+    finally:
+        destroy_traffic(traffic_actors)
+        try:
+            if vehicle and vehicle.is_alive:
+                vehicle.set_autopilot(False)
+                vehicle.destroy()
+                log("Vehicle destroyed.")
+        except Exception:
+            pass
 
 
 
