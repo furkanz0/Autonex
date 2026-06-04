@@ -697,6 +697,7 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     stall_t = 0
     assist_frames = 0
     wp_idx = 0
+    was_tm_overridden = False
     route_guided = bool(guide_route and waypoints and len(waypoints) >= 2)
 
     goal_str = f"({end_loc.x:.0f}, {end_loc.y:.0f})" if end_loc else "None (free drive)"
@@ -777,8 +778,9 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
         elif rules_decision.override:
             # Trafik Kuralları Motoru devreye girdi (EMERGENCY / RED_LIGHT / ACC)
             ctrl = rules_decision.to_carla_control()
-            if traffic_manager is not None:
+            if traffic_manager is not None and not was_tm_overridden:
                 vehicle.set_autopilot(False)
+                was_tm_overridden = True
             vehicle.apply_control(ctrl)
         elif obey_camera_light:
             # Kırmızı ışık — fren uygula, mevcut direksiyonu koru
@@ -794,8 +796,14 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                     steer=float(last_steer))
             
             # TM devredeyse, TM'nin oluşturduğu control'ü eziyoruz
+            if traffic_manager is not None and not was_tm_overridden:
+                vehicle.set_autopilot(False)
+                was_tm_overridden = True
             vehicle.apply_control(ctrl)
         elif traffic_manager is not None:
+            if was_tm_overridden:
+                _restore_tm_lane_following(traffic_manager, vehicle, route_lock, world)
+                was_tm_overridden = False
             ctrl = vehicle.get_control()
         else:
             if route_guided:
@@ -947,13 +955,11 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                     print(f"\n  [!] {stall_t//20}s stalled! TM low-speed unstick...")
                     vehicle.set_autopilot(False)
                     _try_low_speed_unstick(world, vehicle, ctrl.steer, frames=16, throttle=0.38)
-                    try:
-                        vehicle.set_autopilot(True, traffic_manager.get_port())
-                    except Exception:
-                        pass
+                    _restore_tm_lane_following(traffic_manager, vehicle, route_lock, world)
                     if route_lock is not None:
                         route_lock.reload(world=world, force=True, preserve_locked_lane=True)
                     stall_t = 0
+                    was_tm_overridden = False
                 else:
                     print(f"\n  [!] {stall_t//20}s stalled! low-speed assist armed...")
                     assist_frames = 20

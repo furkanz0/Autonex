@@ -150,7 +150,7 @@ class MapNavigator:
             w_pts = self._interpolate_segment_world(wp_s, wp_e)
             for i in range(len(w_pts) - 1):
                 self._world_road_segments.append(
-                    (w_pts[i][0], w_pts[i][1], w_pts[i+1][0], w_pts[i+1][1]))
+                    (w_pts[i][0], w_pts[i][1], w_pts[i][2], w_pts[i+1][0], w_pts[i+1][1], w_pts[i+1][2]))
 
     def _interpolate_segment(self, wp_start, wp_end, step=2.0):
         """Detail the path from start → end with a waypoint chain."""
@@ -174,16 +174,16 @@ class MapNavigator:
         pts = []
         cur = wp_start
         end_loc = wp_end.transform.location
-        pts.append((cur.transform.location.x, cur.transform.location.y))
+        pts.append((cur.transform.location.x, cur.transform.location.y, cur.transform.location.z))
         for _ in range(500):
             nxt = cur.next(step)
             if not nxt:
                 break
             cur = nxt[0]
-            pts.append((cur.transform.location.x, cur.transform.location.y))
+            pts.append((cur.transform.location.x, cur.transform.location.y, cur.transform.location.z))
             if cur.transform.location.distance(end_loc) < step * 1.5:
                 break
-        pts.append((end_loc.x, end_loc.y))
+        pts.append((end_loc.x, end_loc.y, end_loc.z))
         return pts
 
     # ─── Coordinate Transforms ───────────────────────────────────────────
@@ -366,22 +366,23 @@ class MapNavigator:
 
         cx, cy = click_loc.x, click_loc.y
 
-        for wx1, wy1, wx2, wy2 in self._world_road_segments:
+        for wx1, wy1, wz1, wx2, wy2, wz2 in self._world_road_segments:
             # Point-to-line-segment distance in world coordinates
             dx, dy = wx2 - wx1, wy2 - wy1
             seg_len_sq = dx * dx + dy * dy
 
             if seg_len_sq < 0.01:  # degenerate segment
-                px, py = wx1, wy1
+                px, py, pz = wx1, wy1, wz1
             else:
                 t = max(0.0, min(1.0, ((cx - wx1) * dx + (cy - wy1) * dy) / seg_len_sq))
                 px = wx1 + t * dx
                 py = wy1 + t * dy
+                pz = wz1 + t * (wz2 - wz1)
 
             d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
             if d < best_dist:
                 best_dist = d
-                best_point = (px, py)
+                best_point = (px, py, pz)
 
         # Step 2: Max distance check — reject if click is too far from any road
         if best_point is None or best_dist > 50.0:
@@ -389,7 +390,7 @@ class MapNavigator:
             return None
 
         # Step 3: Use the geometric closest point for CARLA waypoint snap
-        snapped_loc = carla.Location(x=best_point[0], y=best_point[1], z=0.0)
+        snapped_loc = carla.Location(x=best_point[0], y=best_point[1], z=best_point[2])
         wp = self.wmap.get_waypoint(
             snapped_loc, project_to_road=True,
             lane_type=carla.LaneType.Driving)
