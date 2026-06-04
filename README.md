@@ -10,122 +10,115 @@
 <h3 align="center">Vision-Based Autonomous Driving Simulation</h3>
 
 <p align="center">
-  <i>Tamamen bilgisayarla görü (Computer Vision) ile çalışan, gerçek zamanlı otonom sürüş simülasyonu.</i><br/>
-  <i>CARLA Simulator üzerinde şerit takibi, trafik ışığı tanıma ve adaptif hız sabitleme.</i>
+  <i>A real-time autonomous driving simulation powered entirely by Computer Vision.</i><br/>
+  <i>Lane following, traffic light recognition, and adaptive cruise control on CARLA Simulator.</i>
 </p>
 
 <br/>
 
-<!-- ══════════════════════════════════════════════════════════════════
-     📸 ANA EKRAN GÖRÜNTÜLERİ
-     Aşağıdaki yorum satırlarındaki placeholder'ları kendi ekran
-     görüntülerinizle değiştirin. Dosyaları screenshots/ klasörüne
-     koyup yolunu güncelleyin.
-     ══════════════════════════════════════════════════════════════════ -->
-
 <p align="center">
   <img src="screenshots/simulation_overview.png" width="90%" alt="Simulation Overview"/>
-  <br/><i>Tam simülasyon görünümü — MiniMap, Şerit Kamerası, Trafik Işığı ve Araç Tespit panelleri</i>
+  <br/><i>Full simulation view — MiniMap, Lane Camera, Traffic Light Detector, and Vehicle Detection panels running simultaneously</i>
 </p>
 
 ---
 
-## 📌 Proje Hakkında
+## 📌 About the Project
 
-**Autonex**, CARLA Simulator ve Python kullanılarak geliştirilen ileri düzey bir otonom sürüş simülasyonudur. Projenin temel amacı, karmaşık kentsel ortamlarda bir aracı **tamamen gerçek zamanlı bilgisayarla görü ve görüntü işleme teknikleri** ile güvenli ve yasal şekilde yönlendirmektir.
+**Autonex** is an advanced autonomous driving simulation developed using CARLA Simulator and Python. The primary goal is to navigate a vehicle through complex urban environments **entirely using real-time computer vision and image processing techniques** in a safe and traffic-compliant manner.
 
-> **Hiçbir derin öğrenme modeli veya önceden eğitilmiş ağ kullanılmamıştır.**  
-> Tüm algılama, klasik OpenCV algoritmaları (HSV renk uzayı, Canny kenar tespiti, Hough dönüşümü, kontur analizi, perspektif warp) ile yapılmaktadır.
+> **No deep learning models or pre-trained networks are used.**  
+> All perception is performed using classical OpenCV algorithms (HSV color space, Canny edge detection, Hough transform, contour analysis, perspective warp).
 
 ---
 
-## 🚀 Temel Özellikler
+## 🚀 Key Features
 
-### 🛣️ Gerçek Zamanlı Şerit Takibi
-Ön RGB kameradan alınan görüntülere uygulanan pipeline:
+### 🛣️ Real-Time Lane Following
+Processing pipeline applied to front RGB camera images:
 
-| Adım | Teknik | Açıklama |
-|:----:|--------|----------|
-| 1 | **HLS Renk Filtresi** | Beyaz ve sarı şerit çizgilerinin ayrıştırılması |
-| 2 | **Canny Edge Detection** | Kenar tespiti ile şerit sınırlarının belirlenmesi |
-| 3 | **Perspective Warp** | Kuşbakışı (bird's-eye) görünüme dönüşüm |
-| 4 | **Sliding Window** | Histogram tabanlı kayan pencere ile şerit piksellerinin tespiti |
-| 5 | **2. Derece Polinom Fit** | Şerit eğrisinin matematiksel modellenmesi |
-| 6 | **PID Kontrol** | Lateral offset ve eğrilik bazlı direksiyon kontrolü |
+| Step | Technique | Description |
+|:----:|-----------|-------------|
+| 1 | **HLS Color Filter** | Isolation of white and yellow lane markings |
+| 2 | **Canny Edge Detection** | Edge detection for lane boundary identification |
+| 3 | **Perspective Warp** | Transformation to bird's-eye view |
+| 4 | **Sliding Window** | Histogram-based sliding window for lane pixel detection |
+| 5 | **2nd Degree Polynomial Fit** | Mathematical modeling of lane curvature |
+| 6 | **PID Control** | Steering control based on lateral offset and curvature |
 
 <p align="center">
   <img src="screenshots/lane_detection.png" width="70%" alt="Lane Detection Pipeline"/>
-  <br/><i>Lane Dashboard — Camera Overlay + Bird's-Eye Warped görünüm ile şerit tespiti</i>
+  <br/><i>Lane Dashboard — Camera overlay + bird's-eye warped view for lane detection</i>
 </p>
 
-### 🚦 Trafik Işığı Tanıma
-Kamera tabanlı, tamamen OpenCV HSV renk analizi ile çalışır:
+### 🚦 Traffic Light Recognition
+Camera-based detection using pure OpenCV HSV color analysis:
 
-- **Çift HSV Aralığı:** Kırmızı rengin 0°/180° sarmalanmasına uygun çift maske
-- **Kontur Analizi:** Alan, dairesellik, aspect ratio ve extent filtreleri
-- **Koyu Gövde Kontrolü:** Trafik ışığı kasası doğrulaması (false positive azaltma)
-- **Çoklu Frame Doğrulama:** Ardışık 3+ frame'de tespit → onaylı durdurma kararı
-- **CARLA World Validation:** Kamera tespiti + dünya verisi çapraz doğrulama
+- **Dual HSV Range:** Dual mask for red color wrapping at 0°/180°
+- **Contour Analysis:** Area, circularity, aspect ratio, and extent filters
+- **Dark Body Verification:** Traffic light housing validation (false positive reduction)
+- **Multi-Frame Confirmation:** Detection in 3+ consecutive frames → confirmed stop decision
+- **CARLA World Validation:** Camera detection + world data cross-validation
 
 <p align="center">
   <img src="screenshots/traffic_light.png" width="70%" alt="Traffic Light Detection"/>
-  <br/><i>Traffic Light Detector — HSV renk maskeleri ve kontur analizi ile trafik ışığı tespiti</i>
+  <br/><i>Traffic Light Detector — HSV color masks and contour analysis for traffic light detection</i>
 </p>
 
-### 🚙 OpenCV Araç Tespiti & Adaptif Hız Sabitleme (ACC)
-Ön kamera görüntüsünden diğer araçları tespit edip mesafe tahmini yapar:
+### 🚙 OpenCV Vehicle Detection & Adaptive Cruise Control (ACC)
+Detects other vehicles from the front camera image and estimates distance:
 
-- **Canny + Background Subtraction** ile hareket eden nesnelerin tespiti
-- **Perspektif geometri** ile piksel genişliğinden metre cinsinden mesafe hesaplama
-- **4 durumlu FSM:** `FREE_DRIVE → FOLLOWING → BRAKING → EMERGENCY`
-- **EMA yumuşatma** ile ani gaz/fren geçişlerinin önlenmesi
+- **Canny + Background Subtraction** for moving object detection
+- **Perspective geometry** for distance estimation from pixel width (in meters)
+- **4-state FSM:** `FREE_DRIVE → FOLLOWING → BRAKING → EMERGENCY`
+- **EMA smoothing** to prevent abrupt throttle/brake transitions
 
 <p align="center">
   <img src="screenshots/vehicle_detection.png" width="70%" alt="Vehicle Detection & ACC"/>
-  <br/><i>Vehicle Detection — Bounding box ile araç tespiti ve ACC mesafe kontrolü</i>
+  <br/><i>Vehicle Detection — Bounding box vehicle detection and ACC distance control</i>
 </p>
 
-### 🗺️ İnteraktif Harita Navigasyonu
-Pygame tabanlı kuşbakışı harita navigatörü:
+### 🗺️ Interactive Map Navigation
+Pygame-based bird's-eye map navigator:
 
-- **Sol tık** → Başlangıç noktası seçimi (yola snap)
-- **Sağ tık** → Bitiş noktası seçimi (yola snap)
-- **Scroll** → Yakınlaştırma / uzaklaştırma
-- **Orta tık sürükleme** → Haritayı kaydırma
-- **ENTER** → Rota hesapla ve simülasyonu başlat
-- **GlobalRoutePlanner** ile otomatik rota oluşturma
+- **Left Click** → Set start point (snaps to road)
+- **Right Click** → Set end point (snaps to road)
+- **Scroll** → Zoom in / out
+- **Middle Click Drag** → Pan the map
+- **ENTER** → Calculate route and start simulation
+- **GlobalRoutePlanner** for automatic route generation
 
 <p align="center">
   <img src="screenshots/map_navigator.png" width="70%" alt="Map Navigator"/>
-  <br/><i>İnteraktif Harita Navigatörü — Town10HD üzerinde rota seçimi</i>
+  <br/><i>Interactive Map Navigator — Route selection on Town10HD</i>
 </p>
 
-### 🔧 Ek Yetenekler
+### 🔧 Additional Features
 
-| Özellik | Açıklama |
-|---------|----------|
-| **NPC Trafik** | 100 adet otonom NPC araç ile yoğun trafik ortamı |
-| **Şerit Değiştirme** | `A/D` veya `←/→` tuşlarıyla manuel şerit değiştirme |
-| **Hava Durumu** | `1/2/3` tuşlarıyla güneşli / yağmurlu / karlı hava değişimi |
-| **Çoklu Kamera** | DroneCam, ChaseCam ve MiniMap eş zamanlı görüntüleme |
-| **Stall Recovery** | 5 saniyelik hareketsizlikte otomatik kurtarma mekanizması |
-| **Yeşil Rota Çizgisi** | Waypoint rotasının dünya üzerinde gerçek zamanlı çizimi |
+| Feature | Description |
+|---------|-------------|
+| **NPC Traffic** | Dense traffic environment with 100 autonomous NPC vehicles |
+| **Lane Changing** | Manual lane change with `A/D` or `←/→` keys |
+| **Weather Control** | Switch between sunny / rainy / snowy with `1/2/3` keys |
+| **Multi-Camera** | Simultaneous DroneCam, ChaseCam, and MiniMap display |
+| **Stall Recovery** | Automatic recovery mechanism after 5 seconds of inactivity |
+| **Green Route Line** | Real-time waypoint route visualization on the world |
 
 ---
 
-## 🛠️ Sistem Mimarisi
+## 🛠️ System Architecture
 
-Proje **MVC (Model-View-Controller)** tasarım deseni ile üç katmanlı modüler mimari kullanır:
+The project uses a three-layer modular architecture based on the **MVC (Model-View-Controller)** design pattern:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          main.py (Entry Point)                      │
-│             Mod seçimi: --map / --lane / default                    │
+│             Mode selection: --map / --lane / default                │
 └────────┬──────────────────────┬──────────────────────┬──────────────┘
          │                      │                      │
     ┌────▼──────┐         ┌─────▼─────┐         ┌─────▼──────┐
     │  MODELS   │         │   VIEWS   │         │ CONTROLLERS│
-    │ (Algılama)│         │ (Görsel)  │         │  (Kontrol) │
+    │(Perception│         │ (Display) │         │ (Control)  │
     └───────────┘         └───────────┘         └────────────┘
 
  ╔═══════════════╗    ╔════════════════════╗    ╔═══════════════════╗
@@ -141,23 +134,23 @@ Proje **MVC (Model-View-Controller)** tasarım deseni ile üç katmanlı modüle
                       ╚════════════════════╝
 ```
 
-### Algılama Pipeline'ları
+### Perception Pipelines
 
 ```
-Ön Kamera (640×480, FOV 110°)
+Front Camera (640×480, FOV 110°)
        │
-       ├──▶ LaneDetector ──▶ HLS → Canny → Warp → Sliding Window → Polinom Fit
+       ├──▶ LaneDetector ──▶ HLS → Canny → Warp → Sliding Window → Polynomial Fit
        │                         └──▶ lateral_offset_m, curvature_m, confidence
        │
-       ├──▶ TrafficLightDetector ──▶ HSV Maskeleme → Kontur → Dairesellik Filtre
+       ├──▶ TrafficLightDetector ──▶ HSV Masking → Contour → Circularity Filter
        │                                └──▶ state (red/green/none), should_stop
        │
-       └──▶ VehicleDetector ──▶ Canny + MOG2 → Kontur → Perspektif Mesafe
+       └──▶ VehicleDetector ──▶ Canny + MOG2 → Contour → Perspective Distance
                                     └──▶ closest_distance_m, vehicle_count
                                               │
                                     ┌─────────▼──────────┐
                                     │  TrafficRulesEngine │
-                                    │  (Karar Birleştirme)│
+                                    │ (Decision Merging)  │
                                     └─────────┬──────────┘
                                               │
                                     ┌─────────▼──────────┐
@@ -168,80 +161,80 @@ Proje **MVC (Model-View-Controller)** tasarım deseni ile üç katmanlı modüle
 
 ---
 
-## 📂 Dosya Yapısı
+## 📂 Project Structure
 
 ```
 Autonex/
-├── main.py                          # Ana giriş noktası ve mod yönetimi
-├── config.py                        # Tüm sabitler ve parametreler
+├── main.py                          # Main entry point and mode management
+├── config.py                        # All constants and parameters
 │
-├── models/                          # 🧠 Algılama & Veri Katmanı
-│   ├── lane_detector.py             #    Şerit tespit pipeline (OpenCV)
-│   ├── vehicle_detector.py          #    Araç tespit & mesafe tahmini
-│   ├── route.py                     #    Rota planlama (GlobalRoutePlanner)
-│   ├── connection.py                #    CARLA sunucu bağlantı yönetimi
-│   ├── vehicle.py                   #    Ego araç spawn & fizik
-│   ├── traffic.py                   #    NPC trafik yönetimi
-│   └── npc_manager.py              #    NPC araç yaşam döngüsü
+├── models/                          # 🧠 Perception & Data Layer
+│   ├── lane_detector.py             #    Lane detection pipeline (OpenCV)
+│   ├── vehicle_detector.py          #    Vehicle detection & distance estimation
+│   ├── route.py                     #    Route planning (GlobalRoutePlanner)
+│   ├── connection.py                #    CARLA server connection management
+│   ├── vehicle.py                   #    Ego vehicle spawn & physics
+│   ├── traffic.py                   #    NPC traffic management
+│   └── npc_manager.py              #    NPC vehicle lifecycle
 │
-├── views/                           # 🖥️ Görselleştirme Katmanı
-│   ├── lane_dashboard.py            #    Şerit tespit dashboard paneli
-│   ├── traffic_light_panel.py       #    Trafik ışığı debug paneli
-│   ├── vehicle_detection_panel.py   #    Araç tespit overlay paneli
-│   ├── map_navigator.py             #    İnteraktif harita navigatörü
-│   ├── minimap.py                   #    Gerçek zamanlı minimap
-│   ├── chase_cam.py                 #    3. şahıs takip kamerası
-│   ├── drone_cam.py                 #    Kuşbakışı drone kamerası
-│   ├── lane_camera.py               #    Ön kamera sensör yönetimi
-│   ├── lane_cam.py                  #    Şerit kamera penceresi
-│   ├── spectator.py                 #    CARLA spectator kontrolü
-│   └── green_line.py                #    Rota çizgisi çizimi
+├── views/                           # 🖥️ Visualization Layer
+│   ├── lane_dashboard.py            #    Lane detection dashboard panel
+│   ├── traffic_light_panel.py       #    Traffic light debug panel
+│   ├── vehicle_detection_panel.py   #    Vehicle detection overlay panel
+│   ├── map_navigator.py             #    Interactive map navigator
+│   ├── minimap.py                   #    Real-time minimap
+│   ├── chase_cam.py                 #    3rd person chase camera
+│   ├── drone_cam.py                 #    Bird's-eye drone camera
+│   ├── lane_camera.py               #    Front camera sensor management
+│   ├── lane_cam.py                  #    Lane camera window
+│   ├── spectator.py                 #    CARLA spectator control
+│   └── green_line.py                #    Route line drawing
 │
-├── controllers/                     # 🎮 Kontrol & Karar Katmanı
-│   ├── simulation.py                #    Ana simülasyon döngüsü (orchestrator)
-│   ├── lane_controller.py           #    PID şerit takip kontrolcüsü
-│   ├── traffic_light_controller.py  #    Kamera trafik ışığı tespiti
-│   ├── acc_controller.py            #    Adaptif Hız Sabitleme (ACC)
-│   ├── traffic_rules_engine.py      #    Trafik kuralları karar motoru
-│   └── vehicle_controller.py        #    Waypoint PID kontrolcüsü
+├── controllers/                     # 🎮 Control & Decision Layer
+│   ├── simulation.py                #    Main simulation loop (orchestrator)
+│   ├── lane_controller.py           #    PID lane following controller
+│   ├── traffic_light_controller.py  #    Camera traffic light detection
+│   ├── acc_controller.py            #    Adaptive Cruise Control (ACC)
+│   ├── traffic_rules_engine.py      #    Traffic rules decision engine
+│   └── vehicle_controller.py        #    Waypoint PID controller
 │
-└── utils/                           # 🔧 Yardımcı Araçlar
-    └── logger.py                    #    Formatlı konsol logger
+└── utils/                           # 🔧 Utilities
+    └── logger.py                    #    Formatted console logger
 ```
 
 ---
 
-## ⚙️ Çalıştırma Modları
+## ⚙️ Running Modes
 
 ```bash
-# 1. Varsayılan Rota — Sabit başlangıç/bitiş noktaları ile waypoint PID
+# 1. Default Route — Fixed start/end points with waypoint PID
 python main.py
 
-# 2. Harita Navigatörü — İnteraktif rota seçimi
+# 2. Map Navigator — Interactive route selection
 python main.py --map
 
-# 3. Şerit Takibi — Kamera tabanlı otonom sürüş
+# 3. Lane Following — Camera-based autonomous driving
 python main.py --lane
 
-# 4. Harita + Şerit — İnteraktif rota seçimi + kamera şerit takibi
+# 4. Map + Lane — Interactive route selection + camera lane following
 python main.py --map --lane
 ```
 
-### Kontrol Tuşları (Simülasyon İçi)
+### Keyboard Controls (In-Simulation)
 
-| Tuş | İşlev |
-|:---:|-------|
-| `A` / `←` | Sola şerit değiştir |
-| `D` / `→` | Sağa şerit değiştir |
-| `1` | ☀️ Güneşli hava |
-| `2` | 🌧️ Yağmurlu hava |
-| `3` | ❄️ Karlı hava |
-| `R` | 🔴 Trafik ışığını kırmızıya zorla |
-| `G` | 🟢 Trafik ışığını yeşile zorla |
+| Key | Function |
+|:---:|----------|
+| `A` / `←` | Change lane left |
+| `D` / `→` | Change lane right |
+| `1` | ☀️ Sunny weather |
+| `2` | 🌧️ Rainy weather |
+| `3` | ❄️ Snowy weather |
+| `R` | 🔴 Force traffic light to red |
+| `G` | 🟢 Force traffic light to green |
 
 ---
 
-## 🖥️ Çoklu Pencere Düzeni
+## 🖥️ Multi-Window Layout
 
 ```
 ┌──────────┐ ┌──────────────────┐ ┌──────────────────┐
@@ -261,39 +254,39 @@ python main.py --map --lane
 
 ---
 
-## 💻 Teknoloji Yığını
+## 💻 Tech Stack
 
-| Kategori | Teknoloji | Kullanım Amacı |
-|----------|-----------|----------------|
-| **Simülasyon** | CARLA 0.9.16 | Gerçekçi kentsel sürüş ortamı (Town10HD) |
-| **Programlama** | Python 3.12 | Tüm uygulama mantığı |
-| **Görüntü İşleme** | OpenCV 4.x | Şerit, trafik ışığı ve araç tespiti |
-| **Bilimsel Hesaplama** | NumPy | Matris işlemleri, polinom fit, perspektif dönüşüm |
-| **GUI / Harita** | Pygame | İnteraktif harita navigatörü ve kamera pencereleri |
+| Category | Technology | Purpose |
+|----------|-----------|---------|
+| **Simulation** | CARLA 0.9.16 | Realistic urban driving environment (Town10HD) |
+| **Programming** | Python 3.12 | All application logic |
+| **Image Processing** | OpenCV 4.x | Lane, traffic light, and vehicle detection |
+| **Scientific Computing** | NumPy | Matrix operations, polynomial fit, perspective transform |
+| **GUI / Map** | Pygame | Interactive map navigator and camera windows |
 
 ---
 
-## 🔧 Kurulum
+## 🔧 Installation
 
-### Gereksinimler
+### Requirements
 - CARLA Simulator 0.9.16
 - Python 3.12+
-- Aşağıdaki Python paketleri:
+- The following Python packages:
 
 ```bash
 pip install opencv-python numpy pygame
 ```
 
-### CARLA Bağlantısı
-`config.py` dosyasında CARLA PythonAPI yolunu güncelleyin:
+### CARLA Connection
+Update the CARLA PythonAPI path in the `config.py` file:
 
 ```python
 CARLA_AGENTS = r"C:\<CARLA_INSTALL_PATH>\PythonAPI\carla"
 ```
 
-### Çalıştırma
-1. CARLA Simulator'ü başlatın
-2. Aşağıdaki komutlardan birini çalıştırın:
+### Running
+1. Start the CARLA Simulator
+2. Run one of the following commands:
 
 ```bash
 python main.py --map --lane
@@ -301,37 +294,37 @@ python main.py --map --lane
 
 ---
 
-## 📸 Ekran Görüntüleri
+## 📸 Screenshots
 
 <p align="center">
   <img src="screenshots/map_navigator.png" width="90%" alt="Map Navigator"/>
-  <br/><i>🗺️ İnteraktif Harita Navigatörü — Town10HD haritasında başlangıç ve bitiş noktası seçimi ile otomatik rota oluşturma</i>
+  <br/><i>🗺️ Interactive Map Navigator — Start and end point selection on the Town10HD map with automatic route generation</i>
 </p>
 
 <p align="center">
   <img src="screenshots/simulation_overview.png" width="90%" alt="Simulation Overview"/>
-  <br/><i>🚗 Tam Simülasyon Görünümü — MiniMap, Lane Camera, Traffic Light Detector ve Vehicle Detection panelleri eş zamanlı çalışırken</i>
+  <br/><i>🚗 Full Simulation View — MiniMap, Lane Camera, Traffic Light Detector, and Vehicle Detection panels running simultaneously</i>
 </p>
 
 <p align="center">
   <img src="screenshots/chase_cam.jpg" width="90%" alt="Chase Camera View"/>
-  <br/><i>🎥 ChaseCam Görünümü — 3. şahıs takip kamerası ile otonom sürüş ve rota çizgisi</i>
+  <br/><i>🎥 ChaseCam View — 3rd person chase camera with autonomous driving and route line</i>
 </p>
 
 ---
 
-## 👥 Ekip
+## 👥 Team
 
-Erciyes Üniversitesi Yazılım Mühendisliği proje takımı tarafından geliştirilmiştir.
+Developed by the Software Engineering project team at Erciyes University.
 
-| İsim | Rol |
-|------|-----|
-| **Furkan Zorlu** | Geliştirici |
-| **Erdem Develioğlu** | Geliştirici |
-| **Abdullah Karaismailoğlu** | Geliştirici |
+| Name | Role |
+|------|------|
+| **Furkan Zorlu** | Developer |
+| **Erdem Develioğlu** | Developer |
+| **Abdullah Karaismailoğlu** | Developer |
 
 ---
 
 <p align="center">
-  <sub>Erciyes Üniversitesi — Yazılım Mühendisliği — 2025</sub>
+  <sub>Erciyes University — Software Engineering — 2025</sub>
 </p>
