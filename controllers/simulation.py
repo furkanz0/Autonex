@@ -179,18 +179,11 @@ def run(world, vehicle, waypoints, wmap, end_loc, minimap=None):
             return {"ok": True, "f": frame, "t": elapsed}
 
         # ── Stall detector (5s) ──────────────────────────────────────
-        if rules_decision.override and rules_decision.brake > 0.3:
-            stall_t = 0  # ACC freni stall değil
-        elif spd < 0.5:
+        if spd < 0.5:
             stall_t += 1
-            if stall_t >= 100:
-                print(f"\n  [!] {stall_t//20}s stalled! "
-                      f"RAW THROTTLE override (2s)...")
-                oc = carla.VehicleControl(throttle=0.8, steer=0.0,
-                                          brake=0.0, hand_brake=False)
-                for _ in range(40):
-                    vehicle.apply_control(oc)
-                    world.tick()
+            if stall_t >= 60:
+                print(f"\n  [!] {stall_t//20}s stalled! low-speed unstick...")
+                _try_low_speed_unstick(world, vehicle, ctrl.steer)
                 stall_t = 0
                 print("  [~] Override done, back to normal.")
         else:
@@ -242,6 +235,26 @@ def _wait_before_close(world, vehicle, minimap=None, waypoints=None, wp_idx=0):
         wt_sleep = FIXED_DELTA - wt_elapsed
         if wt_sleep > 0:
             time.sleep(wt_sleep)
+
+
+def _try_low_speed_unstick(world, vehicle, steer=0.0, frames=18, throttle=0.42):
+    """Nudge the ego vehicle out of tiny static obstacles without tailgating traffic."""
+    lead_distance = _nearest_lead_vehicle_distance(world, vehicle)
+    if lead_distance is not None and lead_distance <= LEAD_VEHICLE_STOP_DISTANCE_M + 1.5:
+        log(f"Unstick skipped: lead vehicle at {lead_distance:.1f}m", "~")
+        return False
+
+    steer = max(-0.25, min(0.25, float(steer)))
+    ctrl = carla.VehicleControl(
+        throttle=float(throttle),
+        brake=0.0,
+        steer=steer,
+        hand_brake=False,
+    )
+    for _ in range(frames):
+        vehicle.apply_control(ctrl)
+        world.tick()
+    return True
 
 
 def _apply_lead_vehicle_guard(world, vehicle, ctrl):
@@ -931,6 +944,15 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
             stall_t += 1
             if stall_t >= 40:
                 if traffic_manager is not None:
+                    print(f"\n  [!] {stall_t//20}s stalled! TM low-speed unstick...")
+                    vehicle.set_autopilot(False)
+                    _try_low_speed_unstick(world, vehicle, ctrl.steer, frames=16, throttle=0.38)
+                    try:
+                        vehicle.set_autopilot(True, traffic_manager.get_port())
+                    except Exception:
+                        pass
+                    if route_lock is not None:
+                        route_lock.reload(world=world, force=True, preserve_locked_lane=True)
                     stall_t = 0
                 else:
                     print(f"\n  [!] {stall_t//20}s stalled! low-speed assist armed...")
