@@ -37,7 +37,7 @@ class LaneCamera:
     def __init__(self, world, vehicle):
         self._frame = None
         self._frame_no = None
-        self._queue = queue.Queue(maxsize=8)
+        self._queue = queue.Queue(maxsize=2)
         self._sensor = None
 
         lib = world.get_blueprint_library()

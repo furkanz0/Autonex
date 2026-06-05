@@ -95,7 +95,7 @@ class LaneDetector:
         self._left_fit = None
         self._right_fit = None
 
-    def process(self, frame) -> LaneResult:
+    def process(self, frame, draw_debug: bool = True) -> LaneResult:
         """
         Tek bir BGR frame'i işleyip LaneResult döndürür.
 
@@ -160,10 +160,15 @@ class LaneDetector:
             confidence = self._compute_confidence(left_pts, right_pts, left_ok, right_ok)
 
         # ── 9. Overlay frame ────────────────────────────────────────
-        overlay = self._draw_overlay(frame, self._left_fit, self._right_fit, detected)
+        if draw_debug:
+            overlay = self._draw_overlay(frame, self._left_fit, self._right_fit, detected)
+            warped_frame = sw_img
+        else:
+            overlay = None
+            warped_frame = None
 
         # ── 10. Debug kayıt (her 50 frame) ───────────────────────────
-        if self._debug_enabled and self._frame_count % 50 == 0:
+        if self._debug_enabled and draw_debug and self._frame_count % 50 == 0:
             self._save_debug(overlay, sw_img)
 
         return LaneResult(
@@ -174,7 +179,7 @@ class LaneDetector:
             left_fit=self._left_fit,
             right_fit=self._right_fit,
             overlay_frame=overlay,
-            warped_frame=sw_img,
+            warped_frame=warped_frame,
         )
 
     # =================================================================

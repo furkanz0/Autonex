@@ -19,7 +19,6 @@ ROUTE_LOOP_CLOSE_M = 8.0
 ROUTE_LOOP_MIN_SPAN = 24
 ROUTE_CANDIDATE_RADIUS_M = 16.0
 ROUTE_MAX_CANDIDATES = 10
-ROUTE_MAX_END_OFFSET_M = 7.5
 
 
 def pick_spawn(wmap, near, toward):
@@ -118,8 +117,7 @@ def build_route(wmap, start_loc, end_loc, world):
                     f"(score {best['score']:.1f}, length {best['length']:.1f}m)"
                 )
                 return best["wps"]
-            print("  [!] GRP returned no route that reaches the selected END point")
-            return []
+            print("  [!] GRP returned no valid candidate routes, falling back")
         except Exception as e:
             print(f"  [!] GRP error: {e}, falling back to .next() chain")
 
@@ -182,9 +180,7 @@ def _ranked_route_candidates(wmap, grp, start_loc, end_loc):
             length = _route_length(wps)
             start_dist = start_loc.distance(wps[0].transform.location)
             end_dist = end_loc.distance(wps[-1].transform.location)
-            if end_dist > ROUTE_MAX_END_OFFSET_M:
-                continue
-            score = length + start_dist * 3.0 + end_dist * 25.0
+            score = length + start_dist * 4.0 + end_dist * 4.0
             ranked.append({
                 "wps": wps,
                 "score": score,
@@ -271,15 +267,8 @@ def _route_length(wps):
 
 
 def _postprocess_route(wps, end_loc):
-    original = list(wps)
     wps = _remove_route_loops(wps)
     wps = _trim_route_near_target(wps, end_loc)
-    if original and wps:
-        original_end_dist = original[-1].transform.location.distance(end_loc)
-        processed_end_dist = wps[-1].transform.location.distance(end_loc)
-        if processed_end_dist > max(ROUTE_MAX_END_OFFSET_M, original_end_dist + 2.0):
-            log("Route cleanup skipped: it moved the route away from target", "!")
-            return original
     return wps
 
 

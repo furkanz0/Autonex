@@ -92,7 +92,6 @@ class MapNavigator:
         # Route waypoints (pixels)
         self._route_pixels = []
         self._route_wps = []     # carla.Waypoint list
-        self._route_end_loc = None
 
         # Store world-coordinate road segments for precise clicking
         self._world_road_segments = []  # (wx1, wy1, wx2, wy2) in world coords
@@ -222,13 +221,11 @@ class MapNavigator:
         if not self.start_loc or not self.end_loc:
             self._route_pixels = []
             self._route_wps = []
-            self._route_end_loc = None
             return
 
         try:
             from models.route import build_route
 
-            self._route_end_loc = None
             self._route_wps = build_route(
                 self.wmap, self.start_loc, self.end_loc, self.world)
             self._route_pixels = []
@@ -237,7 +234,7 @@ class MapNavigator:
                     self._world_to_base(wp.transform.location))
             if self._route_wps:
                 self.start_loc = self._route_wps[0].transform.location
-                self._route_end_loc = self._route_wps[-1].transform.location
+                self.end_loc = self._route_wps[-1].transform.location
             log(f"MapNavigator route computed: {len(self._route_wps)} waypoints")
         except Exception as e:
             log(f"Route compute error: {e}", "!")
@@ -247,7 +244,6 @@ class MapNavigator:
                 self._world_to_base(self.end_loc),
             ]
             self._route_wps = []
-            self._route_end_loc = None
 
     # ─── Screenshot ──────────────────────────────────────────────────────
 
@@ -447,7 +443,6 @@ class MapNavigator:
                             result = {
                                 "start": self.start_loc,
                                 "end": self.end_loc,
-                                "route_end": self._route_end_loc or self.end_loc,
                                 "waypoints": self._route_wps,
                             }
                             running = False

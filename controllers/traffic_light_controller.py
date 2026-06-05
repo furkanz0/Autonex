@@ -93,7 +93,7 @@ class CameraTrafficLightDetector:
     #  PUBLIC API
     # =================================================================
 
-    def process(self, frame) -> TrafficLightResult:
+    def process(self, frame, draw_debug: bool = True) -> TrafficLightResult:
         """
         BGR frame'den trafik ışığı tespit et.
 
@@ -179,12 +179,23 @@ class CameraTrafficLightDetector:
         confirmed = self._red_count >= TL_CONFIRM_FRAMES
 
         # ── 9. Debug overlay ────────────────────────────────────────
-        overlay = self._draw_overlay(
-            frame.copy(), roi_h,
-            red_contours, green_contours,
-            red_best, green_best,
-            state, confirmed,
-        )
+        if draw_debug:
+            overlay = self._draw_overlay(
+                frame.copy(), roi_h,
+                red_contours, green_contours,
+                red_best, green_best,
+                state, confirmed,
+            )
+            result_red_mask = red_mask
+            result_green_mask = green_mask
+            result_red_contours = red_contours
+            result_green_contours = green_contours
+        else:
+            overlay = None
+            result_red_mask = None
+            result_green_mask = None
+            result_red_contours = []
+            result_green_contours = []
 
         return TrafficLightResult(
             state=state,
@@ -193,11 +204,11 @@ class CameraTrafficLightDetector:
             center=center,
             contour_count=contour_count,
             overlay_frame=overlay,
-            red_mask=red_mask,
-            green_mask=green_mask,
+            red_mask=result_red_mask,
+            green_mask=result_green_mask,
             roi_h=roi_h,
-            red_contours=red_contours,
-            green_contours=green_contours,
+            red_contours=result_red_contours,
+            green_contours=result_green_contours,
         )
 
     # =================================================================

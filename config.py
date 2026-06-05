@@ -42,6 +42,16 @@ TIMEOUT_S   = 20.0
 FIXED_DELTA = 0.05
 
 # =====================================================================
+#  PERFORMANCE / PRESENTATION
+# =====================================================================
+# These keep the driving/control loop at FIXED_DELTA while reducing the
+# cost of debug visuals and OpenCV window refreshes.
+LANE_DASHBOARD_RENDER_EVERY = 2      # 2 = 10 FPS UI at 20 FPS sim
+TL_PANEL_RENDER_EVERY       = 3      # traffic-light presentation panel
+MINIMAP_RENDER_EVERY        = 4
+CARLA_LANE_DEBUG_EVERY      = 1      # 0 disables CARLA in-world lane debug
+
+# =====================================================================
 #  SPEED
 # =====================================================================
 TARGET_SPEED_KMH = 30.0
@@ -221,9 +231,21 @@ NPC_TRAFFIC_ENABLED = True
 NPC_TRAFFIC_COUNT = 100            # Dense traffic; may affect performance
 NPC_TRAFFIC_SEED = 42
 NPC_MIN_EGO_SPAWN_DISTANCE_M = 35.0
-NPC_SPEED_DIFF_PERCENT = 15.0      # Positive means NPCs drive a little slower
-NPC_FOLLOW_DISTANCE_M = 2.0
+NPC_SPEED_DIFF_PERCENT = 35.0      # Positive means NPCs drive slower
+NPC_FOLLOW_DISTANCE_M = 7.0
 NPC_SPAWN_SETTLE_TICKS = 8
+
+# Pedestrian NPCs
+NPC_WALKERS_ENABLED = True
+NPC_WALKER_COUNT = 36
+NPC_WALKER_MIN_EGO_SPAWN_DISTANCE_M = 5.0
+NPC_WALKER_SPAWN_RADIUS_M = 120.0
+NPC_WALKER_AHEAD_DISTANCE_M = 95.0
+NPC_WALKER_SIDE_DISTANCE_M = 35.0
+NPC_WALKER_CROSSWALK_RATIO = 0.25
+NPC_WALKER_FORCED_CROSSING_COUNT = 0
+NPC_WALKER_RUNNING_PERCENT = 0.0
+NPC_WALKER_CROSSING_FACTOR = 0.0
 
 # Extra safety for locally controlled waypoint/PID driving.
 LEAD_VEHICLE_SLOW_DISTANCE_M = 24.0

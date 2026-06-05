@@ -1,11 +1,13 @@
 """
-main.py - CARLA Town10HD Tesla Simulation entry point.
-
-Usage:
-    python main.py
-    python main.py --map
-    python main.py --lane
-    python main.py --map --lane
+╔══════════════════════════════════════════════════════════════════════╗
+║  main.py — CARLA Town10HD Tesla Simulation (MVC Entry Point)         ║
+║                                                                      ║
+║  Usage:                                                              ║
+║    python main.py               → Waypoint control (default route)   ║
+║    python main.py --map         → Map navigator + waypoint control   ║
+║    python main.py --lane        → Lane following (default route)     ║
+║    python main.py --map --lane  → Map navigator + lane following     ║
+╚══════════════════════════════════════════════════════════════════════╝
 """
 
 import sys
@@ -29,102 +31,149 @@ from controllers.simulation import run, run_lane
 
 
 def run_with_map(client, world, wmap, orig):
-    """Interactive route selection via map navigator and waypoint control."""
-    sec("MAP NAVIGATOR MODE")
-    vehicle = None
+    """Interactive route selection via map navigator and test."""
     traffic_actors = []
+
+    sec("MAP NAVIGATOR MODE")
     nav = MapNavigator(world)
     result = nav.run()
 
     if result is None:
         print("  [!] Exited map navigator.")
-        return
+        return  
 
     start = result["start"]
     end = result["end"]
-    route_end = result.get("route_end", end)
     nav_waypoints = result.get("waypoints", [])
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
 
-    try:
-        spawn_tf = pick_spawn(wmap, start, end)
-        vehicle = spawn_tesla(world, spawn_tf)
-        settle_physics(world, ticks=15)
-        time.sleep(0.2)
-        motion_test(world, vehicle)
-        traffic_actors = spawn_light_traffic(client, world, vehicle)
+    # Spawn & vehicle — aynı spawn noktasını kullan
+    spawn_tf = pick_spawn(wmap, start, end)
+    vehicle = spawn_tesla(world, spawn_tf)
+    settle_physics(world, ticks=15)
+    time.sleep(0.2)
+    motion_test(world, vehicle)
+    traffic_actors = spawn_light_traffic(client, world, vehicle)
 
-        if len(nav_waypoints) >= 2:
-            waypoints = nav_waypoints
-            log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
-        else:
-            end_snapped = snap_end(wmap, route_end)
-            waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
+    # Navigator'dan gelen rotayı kullan (haritada görünen rota)
+    if len(nav_waypoints) >= 2:
+        waypoints = nav_waypoints
+        log(f"Using navigator's pre-computed route: {len(waypoints)} waypoints")
+    else:
+        # Fallback: tekrar hesapla
+        end_snapped = snap_end(wmap, end)
+        waypoints = build_route(wmap, vehicle.get_location(), end_snapped, world)
 
-        if len(waypoints) < 2:
-            print("[ERROR] Could not compute route!")
-            return
-
-        end_loc = snap_end(wmap, route_end)
-        minimap = MiniMap(world)
-
-        for _ in range(3):
-            world.tick()
-
-        sim_result = run(world, vehicle, waypoints, wmap, end_loc, minimap=minimap)
-        _print_result(sim_result)
-
-    finally:
+    if len(waypoints) < 2:
+        print("[ERROR] Could not compute route!")
         destroy_traffic(traffic_actors)
-        _destroy_vehicle(vehicle)
+        vehicle.destroy()
+        return
+
+    end_loc = waypoints[-1].transform.location
+
+    # Mini-Map & simulation
+    minimap = MiniMap(world)
+    
+    for _ in range(3):
+        world.tick()
+
+    sim_result = run(world, vehicle, waypoints, wmap, end_loc, minimap=minimap)
+
+    sec("RESULT")
+    print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
+    print(f"  Time   : {sim_result['t']:.1f}s")
+    print(f"  Frames : {sim_result['f']}")
+
+    try:
+        destroy_traffic(traffic_actors)
+        if vehicle.is_alive:
+            vehicle.set_autopilot(False)
+            vehicle.destroy()
+            log("Vehicle destroyed.")
+    except Exception:
+        pass
 
 
 def run_default(client, world, wmap, orig):
-    """Run the default hardcoded route with waypoint control."""
+    """Test with default (hardcoded) route."""
     vehicle = None
     traffic_actors = []
 
     try:
+        # ── Spawn & target ───────────────────────────────────────────
         spawn_tf = pick_spawn(wmap, WANT_START, WANT_END)
-        end_loc = snap_end(wmap, WANT_END)
+        end_loc  = snap_end(wmap, WANT_END)
+
+        # ── Vehicle ──────────────────────────────────────────────────
         vehicle = spawn_tesla(world, spawn_tf)
+
+        # ── Physics settling ─────────────────────────────────────────
         settle_physics(world, ticks=15)
         time.sleep(0.2)
+
+        # ── Motion diagnostics ───────────────────────────────────────
         motion_test(world, vehicle)
         traffic_actors = spawn_light_traffic(client, world, vehicle)
 
-        waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
+        # ── Route ────────────────────────────────────────────────────
+        start_loc = vehicle.get_location()
+        waypoints = build_route(wmap, start_loc, end_loc, world)
+
         if len(waypoints) < 2:
             print("[ERROR] Could not compute route!")
             sys.exit(1)
 
+        # ── MiniMap ──────────────────────────────────────────────────
         for _ in range(3):
             world.tick()
 
+        # ── Main loop ────────────────────────────────────────────────
         result = run(world, vehicle, waypoints, wmap, end_loc)
-        _print_result(result)
+
+        # ── Result ───────────────────────────────────────────────────
+        sec("RESULT")
+        print(f"  Status : {'SUCCESS ✓' if result['ok'] else 'INCOMPLETE ✗'}")
+        print(f"  Time   : {result['t']:.1f}s")
+        print(f"  Frames : {result['f']}")
 
     finally:
         destroy_traffic(traffic_actors)
-        _destroy_vehicle(vehicle)
+        if vehicle:
+            try:
+                if vehicle.is_alive:
+                    vehicle.set_autopilot(False)
+                    vehicle.destroy()
+                    log("Vehicle destroyed.")
+            except Exception:
+                pass
 
+
+# =====================================================================
+#  LANE FOLLOWING MODE  (--lane)
+# =====================================================================
 
 def run_lane_default(client, world, wmap, orig):
-    """Run the default hardcoded route with lane following."""
+    """Lane following with default (hardcoded) route."""
     vehicle = None
     traffic_actors = []
 
     try:
+        # ── Spawn & target ───────────────────────────────────────────
         spawn_tf = pick_spawn(wmap, WANT_START, WANT_END)
-        end_loc = snap_end(wmap, WANT_END)
+        end_loc  = snap_end(wmap, WANT_END)
+
+        # ── Vehicle ──────────────────────────────────────────────────
         vehicle = spawn_tesla(world, spawn_tf)
         settle_physics(world, ticks=15)
         time.sleep(0.2)
         motion_test(world, vehicle)
         traffic_actors = spawn_light_traffic(client, world, vehicle)
 
+        # ── Ana döngü (Lane Following) ────────────────────────────────
+        # run_lane kendi kamera, detector, controller, dashboard'unu oluşturur
         waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
         if len(waypoints) < 2:
             waypoints = None
@@ -139,18 +188,30 @@ def run_lane_default(client, world, wmap, orig):
             client=client,
             waypoints=waypoints,
         )
-        _print_result(result)
+
+        # ── Sonuç ────────────────────────────────────────────────────
+        sec("RESULT")
+        print(f"  Status : {'SUCCESS ✓' if result['ok'] else 'INCOMPLETE ✗'}")
+        print(f"  Time   : {result['t']:.1f}s")
+        print(f"  Frames : {result['f']}")
 
     finally:
         destroy_traffic(traffic_actors)
-        _destroy_vehicle(vehicle)
+        if vehicle:
+            try:
+                if vehicle.is_alive:
+                    vehicle.set_autopilot(False)
+                    vehicle.destroy()
+                    log("Vehicle destroyed.")
+            except Exception:
+                pass
 
 
 def run_lane_with_map(client, world, wmap, orig):
-    """Interactive route selection via map navigator and lane following."""
-    sec("MAP NAVIGATOR + LANE FOLLOWING MODE")
-    vehicle = None
+    """Map navigator + lane following."""
     traffic_actors = []
+
+    sec("MAP NAVIGATOR + LANE FOLLOWING MODE")
     nav = MapNavigator(world)
     result = nav.run()
 
@@ -160,61 +221,58 @@ def run_lane_with_map(client, world, wmap, orig):
 
     start = result["start"]
     end = result["end"]
-    route_end = result.get("route_end", end)
-    nav_waypoints = result.get("waypoints", [])
 
     log(f"Selected Start: ({start.x:.1f}, {start.y:.1f})")
     log(f"Selected End:   ({end.x:.1f}, {end.y:.1f})")
 
-    try:
-        spawn_tf = pick_spawn(wmap, start, end)
-        vehicle = spawn_tesla(world, spawn_tf)
-        settle_physics(world, ticks=15)
-        time.sleep(0.2)
-        motion_test(world, vehicle)
-        traffic_actors = spawn_light_traffic(client, world, vehicle)
+    # Spawn & vehicle
+    spawn_tf = pick_spawn(wmap, start, end)
+    vehicle = spawn_tesla(world, spawn_tf)
+    settle_physics(world, ticks=15)
+    time.sleep(0.2)
+    motion_test(world, vehicle)
+    traffic_actors = spawn_light_traffic(client, world, vehicle)
 
-        end_loc = snap_end(wmap, route_end)
-        if len(nav_waypoints) >= 2:
-            waypoints = nav_waypoints
-            log(f"Using navigator route for lane lock: {len(waypoints)} waypoints")
-        else:
-            waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
-            log(f"Computed fallback lane lock route: {len(waypoints)} waypoints")
+    # Hedef konum
+    end_loc = snap_end(wmap, end)
 
-        if len(waypoints) < 2:
-            print("[ERROR] Could not compute lane lock route!")
-            return
+    nav_waypoints = result.get("waypoints", [])
+    if len(nav_waypoints) >= 2:
+        waypoints = nav_waypoints
+        log(f"Using navigator route for lane lock: {len(waypoints)} waypoints")
+    else:
+        waypoints = build_route(wmap, vehicle.get_location(), end_loc, world)
+        log(f"Computed fallback lane lock route: {len(waypoints)} waypoints")
 
-        minimap = MiniMap(world)
-        for _ in range(3):
-            world.tick()
-
-        sim_result = run_lane(
-            world,
-            vehicle,
-            end_loc=end_loc,
-            client=client,
-            waypoints=waypoints,
-            minimap=minimap,
-        )
-        _print_result(sim_result)
-
-    finally:
+    if len(waypoints) < 2:
+        print("[ERROR] Could not compute lane lock route!")
         destroy_traffic(traffic_actors)
-        _destroy_vehicle(vehicle)
+        return
 
+    # Mini-Map
+    minimap = MiniMap(world)
 
-def _print_result(result):
+    for _ in range(3):
+        world.tick()
+
+    # Lane following — run_lane kendi bileşenlerini oluşturur
+    sim_result = run_lane(
+        world,
+        vehicle,
+        end_loc=end_loc,
+        client=client,
+        waypoints=waypoints,
+        minimap=minimap,
+    )
+
     sec("RESULT")
-    print(f"  Status : {'SUCCESS' if result['ok'] else 'INCOMPLETE'}")
-    print(f"  Time   : {result['t']:.1f}s")
-    print(f"  Frames : {result['f']}")
+    print(f"  Status : {'SUCCESS ✓' if sim_result['ok'] else 'INCOMPLETE ✗'}")
+    print(f"  Time   : {sim_result['t']:.1f}s")
+    print(f"  Frames : {sim_result['f']}")
 
-
-def _destroy_vehicle(vehicle):
     try:
-        if vehicle and vehicle.is_alive:
+        destroy_traffic(traffic_actors)
+        if vehicle.is_alive:
             vehicle.set_autopilot(False)
             vehicle.destroy()
             log("Vehicle destroyed.")
@@ -222,32 +280,61 @@ def _destroy_vehicle(vehicle):
         pass
 
 
+
 def main():
     client = None
     orig = None
-    use_map = "--map" in sys.argv
+    use_map  = "--map" in sys.argv
     use_lane = "--lane" in sys.argv
 
+    # Mode adı belirleme
     if use_lane and use_map:
-        mode_name = "MAP + LANE FOLLOWING"
+        mode_name = "MAP + LANE FOLLOWING (OpenCV)"
     elif use_lane:
-        mode_name = "LANE FOLLOWING"
+        mode_name = "LANE FOLLOWING (OpenCV)"
     elif use_map:
-        mode_name = "MAP NAVIGATOR"
+        mode_name = "MAP NAVIGATOR (Waypoint PID)"
     else:
-        mode_name = "DEFAULT ROUTE"
+        mode_name = "DEFAULT ROUTE (Waypoint PID)"
 
-    print(f"\nAutonex Autonomous Driving - Mode: {mode_name}\n")
+    print(f"""
+╔══════════════════════════════════════════════════════════════════════╗
+║  Town10HD Tesla — Autonex Autonomous Driving                        ║
+║  Mode: {mode_name:<59s}║
+╚══════════════════════════════════════════════════════════════════════╝""")
 
     try:
+        # ── Connection & map ─────────────────────────────────────────
         client = connect()
-        world = load_town10(client)
-        wmap = world.get_map()
-        orig = sync_on(world)
+        world  = load_town10(client)    # Town10HD — modern urban city
+        wmap   = world.get_map()
+        orig   = sync_on(world)
+
+# ======================================================================
+# --- CARLA HAVA DURUMU (WEATHER PRESETS) KÜTÜPHANESİ ---
+# Not: Sadece kullanmak istediğiniz havanın başındaki '#' işaretini silin.
+# ======================================================================
+
+# --- ☀️ GÜNDÜZ (NOON) SENARYOLARI ---
+# world.set_weather(carla.WeatherParameters.ClearNoon)       # Pırıl pırıl güneşli, temiz hava
+# world.set_weather(carla.WeatherParameters.CloudyNoon)      # Bulutlu ve gölgesiz (Şerit tespiti için en steril hava)
+# world.set_weather(carla.WeatherParameters.WetNoon)         # Yağmur yok ama asfalt sırılsıklam ve yansımalı
+# world.set_weather(carla.WeatherParameters.HardRainNoon)    # Sağanak yağışlı ve ıslak
+# world.set_weather(carla.WeatherParameters.SoftRainNoon)    # Hafif çiseleyen yağmur
+
+# --- 🌅 GÜN BATIMI (SUNSET) SENARYOLARI ---
+# world.set_weather(carla.WeatherParameters.ClearSunset)     # Kızıl gün batımı (Kameraya doğrudan güneş vurur)
+# world.set_weather(carla.WeatherParameters.WetSunset)       # Gün batımı + Islak asfalt (Göz alan yansımalar)
+# world.set_weather(carla.WeatherParameters.HardRainSunset)  # Fırtınalı, karanlık ve kaotik gün batımı
+
+# --- 🌃 GECE (NIGHT) SENARYOLARI ---
+# world.set_weather(carla.WeatherParameters.ClearNight)      # Yıldızlı ve bulutsuz zifiri karanlık
+# world.set_weather(carla.WeatherParameters.HardRainNight)   # Zifiri karanlıkta sağanak yağış
 
         world.set_weather(carla.WeatherParameters.ClearNoon)
         log("Weather: ClearNoon")
 
+        # ── Mode routing ─────────────────────────────────────────────
         if use_lane and use_map:
             run_lane_with_map(client, world, wmap, orig)
         elif use_lane:

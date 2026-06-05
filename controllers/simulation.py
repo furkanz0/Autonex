@@ -11,7 +11,12 @@ import math
 import ctypes
 import carla
 
-from config import TARGET_SPEED_KMH, GOAL_M, MAX_S, FIXED_DELTA
+from config import (
+    TARGET_SPEED_KMH, GOAL_M, MAX_S, FIXED_DELTA,
+    TL_WORLD_VALIDATE_DISTANCE_M, TL_WORLD_VALIDATE_LATERAL_M,
+    LANE_DASHBOARD_RENDER_EVERY, TL_PANEL_RENDER_EVERY,
+    MINIMAP_RENDER_EVERY, CARLA_LANE_DEBUG_EVERY,
+)
 from utils.logger import sec, log
 from views.spectator import spectator_update
 from views.green_line import green_line
@@ -75,7 +80,7 @@ def run(world, vehicle, waypoints, wmap, end_loc, minimap=None):
             return {"ok": False, "f": frame, "t": elapsed}
 
         # ── MiniMap ──────────────────────────────────────────────────
-        if minimap:
+        if minimap and frame % max(1, MINIMAP_RENDER_EVERY) == 0:
             minimap.render(vehicle.get_transform(), waypoints, wp_idx)
 
         # ── Log (every 40 frames) ────────────────────────────────────
@@ -151,7 +156,7 @@ def _wait_before_close(world, vehicle, minimap=None, waypoints=None, wp_idx=0):
         wt0 = time.perf_counter()
         world.tick()
         try:
-            if minimap:
+            if minimap and _ % max(1, MINIMAP_RENDER_EVERY) == 0:
                 minimap.render(vehicle.get_transform(), waypoints, wp_idx)
         except Exception:
             break
@@ -293,10 +298,12 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
             traffic_manager.auto_lane_change(vehicle, False)
             traffic_manager.random_left_lanechange_percentage(vehicle, 0)
             traffic_manager.random_right_lanechange_percentage(vehicle, 0)
-            traffic_manager.distance_to_leading_vehicle(vehicle, 8.0)
+            traffic_manager.distance_to_leading_vehicle(vehicle, 3.0)
             traffic_manager.set_desired_speed(vehicle, 30.0)
             # Otonom kırmızı ışık frenini kapat — tamamen kamera tespitine bırak
             traffic_manager.ignore_lights_percentage(vehicle, 100)
+            traffic_manager.ignore_signs_percentage(vehicle, 100)
+            traffic_manager.ignore_walkers_percentage(vehicle, 0)
             vehicle.set_autopilot(True, traffic_manager.get_port())
             traffic_light_stop = _PreciseTrafficLightStop(traffic_manager, vehicle)
             if waypoints and len(waypoints) >= 2:
@@ -363,14 +370,22 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
     print(f"  {'─'*6}  {'─'*5}  {'─'*6}  {'─'*6}  {'─'*7}  {'─'*5}  {'─'*6}  {'─'*8}")
 
     while True:
+        render_dashboard = frame % max(1, LANE_DASHBOARD_RENDER_EVERY) == 0
+        render_tl_panel = frame % max(1, TL_PANEL_RENDER_EVERY) == 0
+        render_minimap = frame % max(1, MINIMAP_RENDER_EVERY) == 0
+        render_lane_debug = (
+            CARLA_LANE_DEBUG_EVERY > 0 and
+            frame % max(1, CARLA_LANE_DEBUG_EVERY) == 0
+        )
+
         # ── Get camera frame ─────────────────────────────────────────
         raw = cam.frame
 
         # ── Detect lanes (OpenCV) ─────────────────────────────────────
-        lane_result = detector.process(raw)
+        lane_result = detector.process(raw, draw_debug=render_dashboard)
 
         # ── Detect traffic lights (OpenCV HSV) ────────────────────────
-        tl_result = tl_detector.process(raw)
+        tl_result = tl_detector.process(raw, draw_debug=render_tl_panel)
 
         # ── Compute speed ────────────────────────────────────────────
         vel = vehicle.get_velocity()
@@ -383,7 +398,9 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
 
         # ── Compute control ──────────────────────────────────────────
         # Kırmızı ışık varsa, Traffic Manager olsun ya da olmasın kameraya uy
-        obey_camera_light = tl_result.should_stop
+        world_red_stop_loc = _red_light_stop_location_ahead(world, vehicle)
+        world_red_ctrl = _red_light_control_for_stop(vehicle, world_red_stop_loc, spd)
+        obey_camera_light = tl_result.should_stop and world_red_stop_loc is not None
 
         if traffic_manager is not None:
             prev_tm_lane_change = tm_lane_change
@@ -401,11 +418,16 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
                     log(f"Route lock update skipped this frame: {exc}", "!")
 
         tl_stop_ctrl = None
-        if traffic_light_stop is not None:
+        if traffic_light_stop is not None and world_red_stop_loc is not None:
             tl_stop_ctrl = traffic_light_stop.control(world, spd)
+        elif traffic_light_stop is not None:
+            traffic_light_stop.release()
 
         if tl_stop_ctrl is not None:
             ctrl = tl_stop_ctrl
+            vehicle.apply_control(ctrl)
+        elif world_red_ctrl is not None:
+            ctrl = world_red_ctrl
             vehicle.apply_control(ctrl)
         elif obey_camera_light:
             # Kırmızı ışık — fren uygula, mevcut direksiyonu koru
@@ -445,29 +467,35 @@ def run_lane(world, vehicle, end_loc=None, initial_lane_change=None, client=None
 
         # ── Spectator ────────────────────────────────────────────────
         spectator_update(spec, vehicle)
-        try:
-            debug_wp = _current_driving_waypoint(world, vehicle) or controller.debug_lane_waypoint
-            _draw_carla_lane_debug(world, vehicle, debug_wp)
-        except Exception as exc:
-            log(f"Lane debug draw skipped this frame: {exc}", "!")
+        if render_lane_debug:
+            try:
+                debug_wp = _current_driving_waypoint(world, vehicle) or controller.debug_lane_waypoint
+                _draw_carla_lane_debug(world, vehicle, debug_wp)
+            except Exception as exc:
+                log(f"Lane debug draw skipped this frame: {exc}", "!")
 
         # ── Dashboard ────────────────────────────────────────────────
         lane_state_ui = "JUNCTION" if (not obey_camera_light and in_junction) else controller.lane_change_state
-        if not dashboard.render(
-                lane_result, spd, ctrl.steer, frame,
-                lane_state_ui, controller.target_offset_m,
-                tl_state=tl_result.state,
-                tl_confirmed=tl_result.confirmed):
-            print("\n  [!] Window closed")
+        if render_dashboard:
+            if not dashboard.render(
+                    lane_result, spd, ctrl.steer, frame,
+                    lane_state_ui, controller.target_offset_m,
+                    tl_state=tl_result.state,
+                    tl_confirmed=tl_result.confirmed):
+                print("\n  [!] Window closed")
+                vehicle.set_autopilot(False)
+                _cleanup_lane(cam, dashboard, tl_panel, minimap)
+                return {"ok": False, "f": frame, "t": elapsed}
+
+        # ── Traffic Light Panel (sunum penceresi) ─────────────────────
+        if render_tl_panel and not tl_panel.render(tl_result, raw, spd, ctrl):
+            print("\n  [!] Traffic light window closed")
             vehicle.set_autopilot(False)
             _cleanup_lane(cam, dashboard, tl_panel, minimap)
             return {"ok": False, "f": frame, "t": elapsed}
 
-        # ── Traffic Light Panel (sunum penceresi) ─────────────────────
-        tl_panel.render(tl_result, raw, spd, ctrl)
-
         # ── MiniMap ──────────────────────────────────────────────────
-        if minimap and waypoints:
+        if render_minimap and minimap and waypoints:
             # Araç konumuna en yakın waypoint'i bul — rota çizgisi
             # sadece kalan kısmı göstersin
             minimap_idx = wp_idx
@@ -640,10 +668,122 @@ def _route_point_location(point):
     return None
 
 
+def _red_light_stop_location_ahead(world, vehicle, specific_light=None):
+    """Return a red-light stop location only when it is really ahead of ego."""
+    try:
+        ego_tf = vehicle.get_transform()
+        ego_loc = ego_tf.location
+        forward = ego_tf.get_forward_vector()
+        right = carla.Vector3D(forward.y, -forward.x, 0.0)
+        wmap = world.get_map()
+        ego_wp = wmap.get_waypoint(
+            ego_loc, project_to_road=True, lane_type=carla.LaneType.Driving)
+    except Exception:
+        return None
+
+    if specific_light is not None:
+        lights = [specific_light]
+    else:
+        try:
+            lights = list(world.get_actors().filter("traffic.traffic_light"))
+        except Exception:
+            lights = []
+
+    best = None
+    for light in lights:
+        try:
+            if light.get_state() != carla.TrafficLightState.Red:
+                continue
+            stop_wps = light.get_stop_waypoints()
+        except Exception:
+            continue
+        if not _traffic_light_actor_is_ahead(vehicle, light, forward, right, ego_loc):
+            continue
+
+        for stop_wp in stop_wps:
+            try:
+                stop_loc = stop_wp.transform.location
+                delta = stop_loc - ego_loc
+                ahead = delta.x * forward.x + delta.y * forward.y + delta.z * forward.z
+                if ahead < -3.0 or ahead > TL_WORLD_VALIDATE_DISTANCE_M:
+                    continue
+
+                lateral = abs(delta.x * right.x + delta.y * right.y)
+                lane_width = getattr(stop_wp, "lane_width", 3.5) or 3.5
+                max_lateral = min(TL_WORLD_VALIDATE_LATERAL_M, max(lane_width * 2.2, 7.0))
+                if lateral > max_lateral:
+                    continue
+
+                if ego_wp and stop_wp and not getattr(ego_wp, "is_junction", False):
+                    same_direction = True
+                    try:
+                        ego_f = ego_wp.transform.get_forward_vector()
+                        stop_f = stop_wp.transform.get_forward_vector()
+                        same_direction = (ego_f.x * stop_f.x + ego_f.y * stop_f.y) > 0.45
+                    except Exception:
+                        pass
+                    same_road = ego_wp.road_id == stop_wp.road_id
+                    if not (same_road and same_direction):
+                        continue
+
+                score = max(0.0, ahead) + lateral * 2.0
+                if best is None or score < best[0]:
+                    best = (score, stop_loc)
+            except Exception:
+                continue
+
+    return best[1] if best else None
+
+
+def _traffic_light_actor_is_ahead(vehicle, light, forward, right, ego_loc):
+    try:
+        light_loc = light.get_location()
+        delta = light_loc - ego_loc
+        ahead = delta.x * forward.x + delta.y * forward.y + delta.z * forward.z
+        lateral = abs(delta.x * right.x + delta.y * right.y)
+    except Exception:
+        return False
+
+    # Traffic-light meshes are usually placed beside/above the road, so this is
+    # wider than stop-line validation but still rejects unrelated crosswalk areas.
+    if ahead < -8.0 or ahead > TL_WORLD_VALIDATE_DISTANCE_M + 18.0:
+        return False
+    if lateral > max(TL_WORLD_VALIDATE_LATERAL_M * 2.2, 22.0):
+        return False
+    return True
+
+
+def _red_light_control_for_stop(vehicle, stop_loc, speed_kmh):
+    if stop_loc is None:
+        return None
+
+    try:
+        loc = vehicle.get_location()
+        distance = loc.distance(stop_loc)
+        steer = float(vehicle.get_control().steer)
+    except Exception:
+        return None
+
+    if distance <= 2.0:
+        return carla.VehicleControl(throttle=0.0, brake=1.0, steer=steer)
+    if distance <= 4.5:
+        if speed_kmh < 2.0:
+            return carla.VehicleControl(throttle=0.08, brake=0.0, steer=steer)
+        brake = 0.55 if speed_kmh > 7.0 else 0.25
+        return carla.VehicleControl(throttle=0.0, brake=brake, steer=steer)
+    if distance <= 9.0 and speed_kmh > 10.0:
+        return carla.VehicleControl(throttle=0.0, brake=0.28, steer=steer)
+    if distance <= 18.0 and speed_kmh > 15.0:
+        return carla.VehicleControl(throttle=0.0, brake=0.45, steer=steer)
+    if speed_kmh > 25.0:
+        return carla.VehicleControl(throttle=0.0, brake=0.18, steer=steer)
+    return None
+
+
 class _PreciseTrafficLightStop:
     """Move a TM-controlled vehicle closer to the legal red-light stop point."""
 
-    STOP_CENTER_DISTANCE_M = 4.2
+    STOP_CENTER_DISTANCE_M = 2.0
     CREEP_START_DISTANCE_M = 8.5
     MAX_CREEP_KMH = 9.0
 
@@ -697,30 +837,7 @@ class _PreciseTrafficLightStop:
         return light
 
     def _stop_location(self, world, light):
-        try:
-            stop_wps = light.get_stop_waypoints()
-        except Exception:
-            stop_wps = []
-        if not stop_wps:
-            return None
-
-        loc = self.vehicle.get_location()
-        forward = self.vehicle.get_transform().get_forward_vector()
-        best = None
-        for wp in stop_wps:
-            wp_loc = wp.transform.location
-            delta = wp_loc - loc
-            ahead = delta.x * forward.x + delta.y * forward.y
-            if ahead < -1.0:
-                continue
-            dist = loc.distance(wp_loc)
-            score = dist + max(0.0, -ahead) * 10.0
-            if best is None or score < best[0]:
-                best = (score, wp_loc)
-        if best is not None:
-            return best[1]
-
-        return min(stop_wps, key=lambda wp: loc.distance(wp.transform.location)).transform.location
+        return _red_light_stop_location_ahead(world, self.vehicle, light)
 
     def _restore_autopilot(self):
         if not self._active:
@@ -732,8 +849,14 @@ class _PreciseTrafficLightStop:
             self.traffic_manager.random_left_lanechange_percentage(self.vehicle, 0)
             self.traffic_manager.random_right_lanechange_percentage(self.vehicle, 0)
             self.traffic_manager.set_desired_speed(self.vehicle, 30.0)
+            self.traffic_manager.ignore_lights_percentage(self.vehicle, 100)
+            self.traffic_manager.ignore_signs_percentage(self.vehicle, 100)
+            self.traffic_manager.ignore_walkers_percentage(self.vehicle, 0)
         except Exception:
             pass
+
+    def release(self):
+        self._restore_autopilot()
 
 
 class _TrafficManagerRouteLock:
@@ -2032,6 +2155,9 @@ def _start_tm_lane_change(traffic_manager, vehicle, direction, world=None):
     vehicle.set_autopilot(True, traffic_manager.get_port())
     traffic_manager.auto_lane_change(vehicle, False)
     traffic_manager.set_desired_speed(vehicle, 24.0)
+    traffic_manager.ignore_lights_percentage(vehicle, 100)
+    traffic_manager.ignore_signs_percentage(vehicle, 100)
+    traffic_manager.ignore_walkers_percentage(vehicle, 0)
     _force_tm_lane_change(traffic_manager, vehicle, direction)
     return {
         "direction": direction,
@@ -2064,11 +2190,17 @@ def _update_tm_lane_change(traffic_manager, vehicle, task, world=None):
 
     if task["stable_frames"] >= 3:
         traffic_manager.set_desired_speed(vehicle, 30.0)
+        traffic_manager.ignore_lights_percentage(vehicle, 100)
+        traffic_manager.ignore_signs_percentage(vehicle, 100)
+        traffic_manager.ignore_walkers_percentage(vehicle, 0)
         log(f"Traffic Manager lane change completed: {task['direction']}")
         return None
 
     if task["frames"] >= 90:
         traffic_manager.set_desired_speed(vehicle, 30.0)
+        traffic_manager.ignore_lights_percentage(vehicle, 100)
+        traffic_manager.ignore_signs_percentage(vehicle, 100)
+        traffic_manager.ignore_walkers_percentage(vehicle, 0)
         log(f"Traffic Manager lane change timed out: {task['direction']}", "!")
         return None
 
