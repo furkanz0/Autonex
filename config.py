@@ -280,10 +280,10 @@ NPC_MODELS = [                    # Kullanılacak araç modelleri (çeşitlilik)
 #  OPENCV ARAÇ TESPİTİ (Vehicle Detection)
 # =====================================================================
 VD_ROI_TOP_RATIO     = 0.30       # Araç ROI başlangıcı: görüntünün üst %30'u atla
-VD_MIN_AREA          = 2000       # Minimum kontur alanı (piksel²)
+VD_MIN_AREA          = 1200       # Minimum kontur alanı (piksel²)
 VD_MAX_AREA          = 90000      # Maksimum kontur alanı
-VD_MIN_ASPECT        = 0.8        # Min genişlik/yükseklik oranı (araç şekli)
-VD_MAX_ASPECT        = 2.5        # Max genişlik/yükseklik oranı
+VD_MIN_ASPECT        = 0.6        # Min genişlik/yükseklik oranı (araç şekli)
+VD_MAX_ASPECT        = 6.0        # Max genişlik/yükseklik oranı
 VD_REAL_WIDTH_M      = 1.8        # Ortalama araç genişliği (metre)
 VD_FOCAL_LENGTH_PX   = 554        # 640px genişlik @ 90° FOV focal length
 VD_SAFE_DIST_M       = 18.0       # Güvenli takip mesafesi — ACC yavaşlama başlar
