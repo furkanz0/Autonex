@@ -307,7 +307,7 @@ python main.py --map --lane
 </p>
 
 <p align="center">
-  <img src="screenshots/chase_cam.jpg" width="90%" alt="Chase Camera View"/>
+  <img src="screenshots/chase_cam.png" width="90%" alt="Chase Camera View"/>
   <br/><i>🎥 ChaseCam View — 3rd person chase camera with autonomous driving and route line</i>
 </p>
 
