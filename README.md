@@ -326,5 +326,5 @@ Developed by the Software Engineering project team at Erciyes University.
 ---
 
 <p align="center">
-  <sub>Erciyes University — Software Engineering</sub>
+  <sub>Erciyes University — Software Engineering — 2026</sub>
 </p>
